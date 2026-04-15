@@ -4,7 +4,11 @@
       "Bash(rm *)",
       "Bash(pnpm run *)",
       "Bash(command -v pnpm)",
-      "Read(//c/Users/Wareh/AppData/Roaming/npm/**)"
+      "Read(//c/Users/Wareh/AppData/Roaming/npm/**)",
+      "Bash(command -v npm)",
+      "Bash(ls C:/users/wareh/lmbr-ai/apps/web/next.config.*)",
+      "Bash(ls -la C:/users/wareh/lmbr-ai/apps/web/.env*)",
+      "Bash(ls -la C:/users/wareh/lmbr-ai/.env*)"
     ]
   }
 }
