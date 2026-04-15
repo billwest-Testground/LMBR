@@ -24,15 +24,18 @@ create table if not exists public.market_prices (
 create index if not exists market_prices_commodity_recorded_idx
   on public.market_prices(commodity_id, recorded_at desc);
 
+drop trigger if exists trg_market_prices_updated_at on public.market_prices;
 create trigger trg_market_prices_updated_at
 before update on public.market_prices
 for each row execute function public.set_updated_at();
 
 alter table public.market_prices enable row level security;
 
+drop policy if exists market_prices_select on public.market_prices;
 create policy market_prices_select on public.market_prices
   for select using (
     company_id is null or company_id = public.jwt_company_id()
   );
+drop policy if exists market_prices_mutate on public.market_prices;
 create policy market_prices_mutate on public.market_prices
   for all using (company_id = public.jwt_company_id());

@@ -39,18 +39,23 @@ create table if not exists public.quotes (
 
 create index if not exists quotes_bid_idx on public.quotes(bid_id);
 
+drop trigger if exists trg_quotes_updated_at on public.quotes;
 create trigger trg_quotes_updated_at
 before update on public.quotes
 for each row execute function public.set_updated_at();
 
 alter table public.quotes enable row level security;
 
+drop policy if exists quotes_select on public.quotes;
 create policy quotes_select on public.quotes
   for select using (company_id = public.jwt_company_id());
+drop policy if exists quotes_insert on public.quotes;
 create policy quotes_insert on public.quotes
   for insert with check (company_id = public.jwt_company_id());
+drop policy if exists quotes_update on public.quotes;
 create policy quotes_update on public.quotes
   for update using (company_id = public.jwt_company_id());
+drop policy if exists quotes_release_manager on public.quotes;
 create policy quotes_release_manager on public.quotes
   for update using (
     company_id = public.jwt_company_id() and public.jwt_has_role('manager_owner')

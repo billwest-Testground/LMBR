@@ -24,14 +24,17 @@ create table if not exists public.users (
 
 create index if not exists users_company_id_idx on public.users(company_id);
 
+drop trigger if exists trg_users_updated_at on public.users;
 create trigger trg_users_updated_at
 before update on public.users
 for each row execute function public.set_updated_at();
 
 alter table public.users enable row level security;
 
+drop policy if exists users_select on public.users;
 create policy users_select on public.users
   for select using (company_id = public.jwt_company_id());
+drop policy if exists users_mutate_manager on public.users;
 create policy users_mutate_manager on public.users
   for all using (
     company_id = public.jwt_company_id() and public.jwt_has_role('manager_owner')
@@ -49,14 +52,17 @@ create table if not exists public.user_roles (
 
 create index if not exists user_roles_company_user_idx on public.user_roles(company_id, user_id);
 
+drop trigger if exists trg_user_roles_updated_at on public.user_roles;
 create trigger trg_user_roles_updated_at
 before update on public.user_roles
 for each row execute function public.set_updated_at();
 
 alter table public.user_roles enable row level security;
 
+drop policy if exists user_roles_select on public.user_roles;
 create policy user_roles_select on public.user_roles
   for select using (company_id = public.jwt_company_id());
+drop policy if exists user_roles_mutate_manager on public.user_roles;
 create policy user_roles_mutate_manager on public.user_roles
   for all using (
     company_id = public.jwt_company_id() and public.jwt_has_role('manager_owner')

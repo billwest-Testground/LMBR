@@ -21,11 +21,13 @@ create table if not exists public.archive_entries (
 create index if not exists archive_entries_company_idx
   on public.archive_entries(company_id, created_at desc);
 
+drop trigger if exists trg_archive_entries_updated_at on public.archive_entries;
 create trigger trg_archive_entries_updated_at
 before update on public.archive_entries
 for each row execute function public.set_updated_at();
 
 alter table public.archive_entries enable row level security;
 
+drop policy if exists archive_entries_all on public.archive_entries;
 create policy archive_entries_all on public.archive_entries
   for all using (company_id = public.jwt_company_id());

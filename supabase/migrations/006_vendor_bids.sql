@@ -29,12 +29,14 @@ create table if not exists public.vendor_bids (
 
 create index if not exists vendor_bids_bid_vendor_idx on public.vendor_bids(bid_id, vendor_id);
 
+drop trigger if exists trg_vendor_bids_updated_at on public.vendor_bids;
 create trigger trg_vendor_bids_updated_at
 before update on public.vendor_bids
 for each row execute function public.set_updated_at();
 
 alter table public.vendor_bids enable row level security;
 
+drop policy if exists vendor_bids_all on public.vendor_bids;
 create policy vendor_bids_all on public.vendor_bids
   for all using (company_id = public.jwt_company_id());
 
@@ -62,11 +64,13 @@ create table if not exists public.vendor_bid_line_items (
 create index if not exists vbli_vendor_bid_idx on public.vendor_bid_line_items(vendor_bid_id);
 create index if not exists vbli_matched_line_idx on public.vendor_bid_line_items(matched_line_item_id);
 
+drop trigger if exists trg_vbli_updated_at on public.vendor_bid_line_items;
 create trigger trg_vbli_updated_at
 before update on public.vendor_bid_line_items
 for each row execute function public.set_updated_at();
 
 alter table public.vendor_bid_line_items enable row level security;
 
+drop policy if exists vbli_all on public.vendor_bid_line_items;
 create policy vbli_all on public.vendor_bid_line_items
   for all using (company_id = public.jwt_company_id());

@@ -36,11 +36,13 @@ create table if not exists public.line_items (
 create index if not exists line_items_bid_idx on public.line_items(bid_id);
 create index if not exists line_items_consolidation_idx on public.line_items(bid_id, consolidation_key);
 
+drop trigger if exists trg_line_items_updated_at on public.line_items;
 create trigger trg_line_items_updated_at
 before update on public.line_items
 for each row execute function public.set_updated_at();
 
 alter table public.line_items enable row level security;
 
+drop policy if exists line_items_all on public.line_items;
 create policy line_items_all on public.line_items
   for all using (company_id = public.jwt_company_id());

@@ -55,13 +55,16 @@ create table if not exists public.companies (
   updated_at timestamptz not null default now()
 );
 
+drop trigger if exists trg_companies_updated_at on public.companies;
 create trigger trg_companies_updated_at
 before update on public.companies
 for each row execute function public.set_updated_at();
 
 alter table public.companies enable row level security;
 
+drop policy if exists companies_select on public.companies;
 create policy companies_select on public.companies
   for select using (id = public.jwt_company_id());
+drop policy if exists companies_update on public.companies;
 create policy companies_update on public.companies
   for update using (id = public.jwt_company_id() and public.jwt_has_role('manager_owner'));

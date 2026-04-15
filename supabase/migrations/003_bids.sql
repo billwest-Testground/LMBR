@@ -45,18 +45,23 @@ create table if not exists public.bids (
 create index if not exists bids_company_status_idx on public.bids(company_id, status);
 create index if not exists bids_company_created_idx on public.bids(company_id, created_at desc);
 
+drop trigger if exists trg_bids_updated_at on public.bids;
 create trigger trg_bids_updated_at
 before update on public.bids
 for each row execute function public.set_updated_at();
 
 alter table public.bids enable row level security;
 
+drop policy if exists bids_select on public.bids;
 create policy bids_select on public.bids
   for select using (company_id = public.jwt_company_id());
+drop policy if exists bids_insert on public.bids;
 create policy bids_insert on public.bids
   for insert with check (company_id = public.jwt_company_id());
+drop policy if exists bids_update on public.bids;
 create policy bids_update on public.bids
   for update using (company_id = public.jwt_company_id());
+drop policy if exists bids_margin_approve on public.bids;
 create policy bids_margin_approve on public.bids
   for update using (
     company_id = public.jwt_company_id() and public.jwt_has_role('manager_owner')

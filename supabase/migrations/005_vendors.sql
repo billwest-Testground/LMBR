@@ -23,11 +23,13 @@ create table if not exists public.vendors (
 
 create index if not exists vendors_company_idx on public.vendors(company_id);
 
+drop trigger if exists trg_vendors_updated_at on public.vendors;
 create trigger trg_vendors_updated_at
 before update on public.vendors
 for each row execute function public.set_updated_at();
 
 alter table public.vendors enable row level security;
 
+drop policy if exists vendors_all on public.vendors;
 create policy vendors_all on public.vendors
   for all using (company_id = public.jwt_company_id());
