@@ -37,10 +37,15 @@ export default async function DashboardIndex() {
     .eq('user_id', session.user.id);
   const roles = new Set((roleRows ?? []).map((r) => r.role_type as string));
 
-  if (roles.has('owner') || roles.has('manager')) {
-    redirect('/dashboard/manager');
-  }
-  if (roles.has('trader_buyer')) {
+  // Owners + managers see the unified trader/buyer surface until the
+  // dedicated manager dashboard ships in PROMPT 11. They already have
+  // full-tenant visibility via RLS, so the unified view fits them fine
+  // as a stand-in.
+  if (
+    roles.has('owner') ||
+    roles.has('manager') ||
+    roles.has('trader_buyer')
+  ) {
     redirect('/dashboard/unified');
   }
   if (roles.has('buyer')) {
