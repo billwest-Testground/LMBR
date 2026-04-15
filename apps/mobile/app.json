@@ -1,0 +1,45 @@
+{
+  "expo": {
+    "name": "LMBR.ai",
+    "slug": "lmbr-ai",
+    "scheme": "lmbr",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0B5D3B"
+    },
+    "ios": {
+      "bundleIdentifier": "ai.lmbr.app",
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "LMBR.ai uses the camera to scan paper lumber takeoffs directly in the field.",
+        "NSPhotoLibraryUsageDescription": "LMBR.ai uses the photo library to import scanned takeoffs."
+      }
+    },
+    "android": {
+      "package": "ai.lmbr.app",
+      "permissions": ["CAMERA", "READ_EXTERNAL_STORAGE", "WRITE_EXTERNAL_STORAGE"]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-camera",
+      "expo-secure-store",
+      ["expo-document-picker", { "iCloudContainerEnvironment": "Production" }]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "eas": {
+        "projectId": "REPLACE_WITH_EAS_PROJECT_ID"
+      }
+    }
+  }
+}

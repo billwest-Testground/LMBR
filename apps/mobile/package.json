@@ -1,0 +1,41 @@
+{
+  "name": "@lmbr/mobile",
+  "version": "0.1.0",
+  "private": true,
+  "description": "LMBR.ai mobile app — Expo + React Native. Field-ready bid intake (scan), comparison review, margin controls, and market ticker for Traders / Buyers / Trader-Buyer / Manager-Owner roles.",
+  "main": "expo-router/entry",
+  "scripts": {
+    "dev": "expo start",
+    "build": "eas build",
+    "start": "expo start",
+    "ios": "expo start --ios",
+    "android": "expo start --android",
+    "lint": "echo \"@lmbr/mobile: lint stub\"",
+    "type-check": "tsc --noEmit",
+    "clean": "rm -rf .expo dist .turbo"
+  },
+  "dependencies": {
+    "expo": "~51.0.0",
+    "expo-router": "~3.5.0",
+    "expo-camera": "~15.0.0",
+    "expo-document-picker": "~12.0.0",
+    "expo-file-system": "~17.0.0",
+    "expo-print": "~13.0.0",
+    "expo-notifications": "~0.28.0",
+    "expo-secure-store": "~13.0.0",
+    "react": "18.2.0",
+    "react-native": "0.74.0",
+    "@supabase/supabase-js": "^2.45.0",
+    "nativewind": "^4.0.0",
+    "react-native-reanimated": "~3.10.0",
+    "react-native-gesture-handler": "~2.16.0",
+    "@lmbr/types": "workspace:*",
+    "@lmbr/lib": "workspace:*",
+    "@lmbr/config": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "@types/react": "^18.3.0",
+    "@babel/core": "^7.24.0"
+  }
+}

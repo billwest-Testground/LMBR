@@ -1,0 +1,25 @@
+{
+  "name": "@lmbr/lib",
+  "version": "0.1.0",
+  "private": true,
+  "description": "LMBR.ai shared library: Anthropic, Supabase, Outlook/Graph, OCR, PDF, general utils. Consumed by web, mobile, agents.",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "tsc",
+    "type-check": "tsc --noEmit",
+    "lint": "echo \"@lmbr/lib: lint stub\"",
+    "clean": "rm -rf dist .turbo"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.27.0",
+    "@supabase/supabase-js": "^2.45.0",
+    "@microsoft/microsoft-graph-client": "^3.0.7",
+    "@azure/msal-node": "^2.13.0",
+    "zod": "^3.23.0",
+    "@lmbr/types": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}

@@ -1,0 +1,30 @@
+/*
+ * LMBR.ai global stylesheet.
+ *
+ * Purpose:  Loads Tailwind layers and declares the LMBR.ai design-system
+ *           CSS variable placeholders. The variable block will be replaced
+ *           when the UI/UX design system is inserted.
+ * LMBR.ai — Enterprise AI bid automation for wholesale lumber distributors.
+ * Built by Worklighter.
+ */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* PLACEHOLDER — replace with final design system tokens. */
+  --lmbr-primary: #0b5d3b;
+  --lmbr-primary-fg: #ffffff;
+  --lmbr-accent: #c89b3c;
+  --lmbr-accent-fg: #111111;
+  --lmbr-ink: #111111;
+  --lmbr-paper: #fafaf7;
+  --lmbr-muted: #6b6b6b;
+  --lmbr-radius: 0.5rem;
+}
+
+html,
+body {
+  height: 100%;
+}
