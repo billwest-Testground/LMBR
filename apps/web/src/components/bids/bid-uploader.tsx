@@ -41,11 +41,37 @@ import { cn } from '../../lib/cn';
 import type { ExtractionOutput } from '@lmbr/types';
 import type { QaReport } from '@lmbr/agents';
 
+/**
+ * Extraction method badge the route returns on the inline path. Matches
+ * the `methodUsed` field of ProcessIngestResult: either a raw analyzer
+ * method (free paths + OCR) or one of the Claude-assisted modes.
+ */
+export type IngestMethodUsed =
+  | 'excel_parse'
+  | 'csv_parse'
+  | 'docx_parse'
+  | 'pdf_direct'
+  | 'ocr'
+  | 'email_text'
+  | 'direct_text'
+  | 'claude_extraction'
+  | 'claude_mode_a'
+  | 'claude_mode_b';
+
+export interface IngestExtractionReport {
+  method_used: IngestMethodUsed;
+  total_cost_cents: number;
+  total_line_items: number;
+  overall_confidence: number;
+  qa_passed: boolean;
+}
+
 export interface IngestResponse {
   bid_id: string;
   extraction: ExtractionOutput;
   qa_report: QaReport;
   raw_file_url: string | null;
+  extraction_report?: IngestExtractionReport;
 }
 
 export interface BidUploaderProps {
@@ -58,23 +84,108 @@ const ACCEPTED_MIMES: Record<string, string[]> = {
   'application/pdf': ['.pdf'],
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
   'application/vnd.ms-excel': ['.xls'],
+  'text/csv': ['.csv'],
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': [
+    '.docx',
+  ],
   'image/png': ['.png'],
   'image/jpeg': ['.jpg', '.jpeg'],
+  'image/tiff': ['.tiff', '.tif'],
+  'image/bmp': ['.bmp'],
   'text/plain': ['.txt'],
   'message/rfc822': ['.eml'],
   'application/vnd.ms-outlook': ['.msg'],
 };
 
-const STATUS_REEL = [
-  'Reading your list…',
-  'Identifying species and grades…',
-  'Parsing dimensions and lengths…',
-  'Calculating board feet…',
+/**
+ * Tiered status reels (Session Prompt 04). We don't get real progress
+ * events from the server, so the reel is chosen by source type — the
+ * trader sees messages that match the extraction path their file will
+ * actually take, which also educates them about why an Excel upload is
+ * essentially free while a scanned photo costs real money.
+ */
+const REEL_EXCEL = [
+  'Analyzing file format…',
+  'Parsing Excel columns…',
+  'Grouping by building / phase…',
+  'Running quality check…',
+] as const;
+
+const REEL_CSV = [
+  'Analyzing file format…',
+  'Parsing CSV rows…',
+  'Grouping by building / phase…',
+  'Running quality check…',
+] as const;
+
+const REEL_PDF = [
+  'Analyzing file format…',
+  'Extracting text from PDF…',
+  'Grouping by building / phase…',
+  'Running quality check…',
+] as const;
+
+const REEL_DOCX = [
+  'Analyzing file format…',
+  'Extracting text from document…',
+  'Grouping by building / phase…',
+  'Running quality check…',
+] as const;
+
+const REEL_OCR = [
+  'Analyzing file format…',
+  'Running OCR scan…',
+  'Cleaning up with AI…',
+  'Running quality check…',
+] as const;
+
+const REEL_TEXT = [
+  'Reading pasted text…',
+  'Parsing lines…',
+  'Grouping by building / phase…',
+  'Running quality check…',
+] as const;
+
+const REEL_GENERIC = [
+  'Analyzing file format…',
+  'Extracting lumber list…',
   'Grouping by building / phase…',
   'Running quality check…',
 ] as const;
 
 const MAX_FILE_BYTES = 25 * 1024 * 1024; // 25 MB
+
+function pickStatusReel(
+  mode: 'file' | 'paste',
+  file: File | null,
+): readonly string[] {
+  if (mode === 'paste') return REEL_TEXT;
+  if (!file) return REEL_GENERIC;
+  const name = file.name.toLowerCase();
+  if (name.endsWith('.xlsx') || name.endsWith('.xls')) return REEL_EXCEL;
+  if (name.endsWith('.csv')) return REEL_CSV;
+  if (name.endsWith('.pdf')) return REEL_PDF;
+  if (name.endsWith('.docx')) return REEL_DOCX;
+  if (/\.(png|jpe?g|tiff?|bmp)$/.test(name)) return REEL_OCR;
+  if (name.endsWith('.txt') || name.endsWith('.eml') || name.endsWith('.msg')) {
+    return REEL_TEXT;
+  }
+  return REEL_GENERIC;
+}
+
+/**
+ * Dev-only cost badge — only rendered in non-production builds so
+ * traders don't see the sub-cent breakdown on a live tenant. Matches
+ * the Session Prompt 04 spec for "small badge showing extraction cost".
+ */
+const COST_BADGE_ENABLED =
+  process.env['NEXT_PUBLIC_APP_ENV'] !== 'production';
+
+function formatCostCents(cents: number): string {
+  if (cents < 0.1) return '< 0.1¢';
+  if (cents < 1) return `${cents.toFixed(2)}¢`;
+  return `${cents.toFixed(1)}¢`;
+}
 
 // -----------------------------------------------------------------------------
 
@@ -87,6 +198,16 @@ export function BidUploader({ onIngested }: BidUploaderProps) {
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [statusIndex, setStatusIndex] = React.useState(0);
+  // Dev-only cost badge surfaced briefly after a successful inline
+  // ingest. Cleared when the parent unmounts this component or the
+  // trader uploads another file.
+  const [lastCostBadge, setLastCostBadge] =
+    React.useState<IngestExtractionReport | null>(null);
+
+  const statusReel = React.useMemo(
+    () => pickStatusReel(mode, file),
+    [mode, file],
+  );
 
   // Rotate status messages while upload is in flight — README §9.
   React.useEffect(() => {
@@ -95,10 +216,10 @@ export function BidUploader({ onIngested }: BidUploaderProps) {
       return;
     }
     const interval = window.setInterval(() => {
-      setStatusIndex((prev) => (prev + 1) % STATUS_REEL.length);
+      setStatusIndex((prev) => (prev + 1) % statusReel.length);
     }, 1800);
     return () => window.clearInterval(interval);
-  }, [loading]);
+  }, [loading, statusReel.length]);
 
   const onDrop = React.useCallback(
     (accepted: File[], rejected: FileRejection[]) => {
@@ -176,7 +297,11 @@ export function BidUploader({ onIngested }: BidUploaderProps) {
         return;
       }
 
-      onIngested?.(body as IngestResponse);
+      const response = body as IngestResponse;
+      if (COST_BADGE_ENABLED && response.extraction_report) {
+        setLastCostBadge(response.extraction_report);
+      }
+      onIngested?.(response);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Network error during ingest.');
     } finally {
@@ -262,7 +387,7 @@ export function BidUploader({ onIngested }: BidUploaderProps) {
                   or click to browse
                 </div>
                 <div className="text-caption text-text-tertiary">
-                  PDF · XLSX · PNG · JPG · TXT · EML · MSG · up to 25 MB
+                  PDF · XLSX · CSV · DOCX · PNG · JPG · TIFF · TXT · EML · MSG · up to 25 MB
                 </div>
               </>
             )}
@@ -304,7 +429,30 @@ export function BidUploader({ onIngested }: BidUploaderProps) {
             <span />
             <span />
           </span>
-          <span className="text-body text-text-primary">{STATUS_REEL[statusIndex]}</span>
+          <span className="text-body text-text-primary">
+            {statusReel[statusIndex] ?? statusReel[0]}
+          </span>
+        </div>
+      )}
+
+      {/* Dev-only cost badge ---------------------------------------------- */}
+      {COST_BADGE_ENABLED && lastCostBadge && !loading && (
+        <div
+          className="flex flex-wrap items-center gap-2 rounded-sm border border-border-base bg-bg-subtle px-3 py-2 text-caption text-text-tertiary"
+          aria-label="Extraction cost (dev only)"
+        >
+          <span className="font-semibold uppercase tracking-wide text-text-secondary">
+            dev · cost
+          </span>
+          <span>{formatCostCents(lastCostBadge.total_cost_cents)}</span>
+          <span aria-hidden="true">·</span>
+          <span>{lastCostBadge.method_used}</span>
+          <span aria-hidden="true">·</span>
+          <span>{lastCostBadge.total_line_items} lines</span>
+          <span aria-hidden="true">·</span>
+          <span>
+            {Math.round(lastCostBadge.overall_confidence * 100)}% confidence
+          </span>
         </div>
       )}
 
@@ -408,8 +556,14 @@ function FilePreview({
 function iconForFile(file: File) {
   const name = file.name.toLowerCase();
   if (name.endsWith('.pdf')) return FileText;
-  if (name.endsWith('.xlsx') || name.endsWith('.xls')) return FileSpreadsheet;
-  if (/\.(png|jpe?g|gif|webp)$/.test(name)) return ImageIcon;
+  if (
+    name.endsWith('.xlsx') ||
+    name.endsWith('.xls') ||
+    name.endsWith('.csv')
+  ) {
+    return FileSpreadsheet;
+  }
+  if (/\.(png|jpe?g|gif|webp|tiff?|bmp)$/.test(name)) return ImageIcon;
   if (name.endsWith('.eml') || name.endsWith('.msg')) return Mail;
   return FileText;
 }

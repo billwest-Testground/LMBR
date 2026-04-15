@@ -13,11 +13,14 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.27.0",
-    "zod": "^3.23.0",
+    "@lmbr/config": "workspace:*",
+    "@lmbr/lib": "workspace:*",
     "@lmbr/types": "workspace:*",
-    "@lmbr/config": "workspace:*"
+    "xlsx": "^0.18.5",
+    "zod": "^3.23.0"
   },
   "devDependencies": {
+    "@types/node": "^20.12.0",
     "typescript": "^5.4.0"
   }
 }

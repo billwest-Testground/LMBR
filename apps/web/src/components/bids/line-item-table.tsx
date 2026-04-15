@@ -36,11 +36,21 @@ import {
   ChevronRight,
   Save,
   ArrowRight,
+  Sheet,
+  FileText,
+  ScanLine,
+  Sparkles,
 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 
 import { Button } from '../ui/button';
 import { cn } from '../../lib/cn';
-import type { ExtractionOutput, ExtractedLineItem, LineItemUnit } from '@lmbr/types';
+import type {
+  ExtractedLineItem,
+  ExtractionMethod,
+  ExtractionOutput,
+  LineItemUnit,
+} from '@lmbr/types';
 import type { QaReport, QaLineItemIssue } from '@lmbr/agents';
 
 // -----------------------------------------------------------------------------
@@ -184,6 +194,9 @@ export function LineItemTable({
                 <Th className="w-10" align="center">
                   <span className="sr-only">Confidence</span>
                 </Th>
+                <Th className="w-10" align="center">
+                  <span className="sr-only">Extraction method</span>
+                </Th>
                 <Th>Species</Th>
                 <Th>Dimension</Th>
                 <Th>Grade</Th>
@@ -224,7 +237,7 @@ export function LineItemTable({
             </tbody>
             <tfoot className="sticky bottom-0 z-20">
               <tr className="bg-bg-elevated">
-                <td colSpan={5} className="border-t border-border-strong px-3 py-3">
+                <td colSpan={6} className="border-t border-border-strong px-3 py-3">
                   <span className="text-label uppercase text-text-tertiary">Grand total</span>
                 </td>
                 <td className="border-t border-border-strong px-3 py-3 text-right font-mono tabular-nums text-text-primary">
@@ -377,7 +390,7 @@ function GroupHeaderRow({
   return (
     <tr className="sticky top-[37px] z-10">
       <td
-        colSpan={9}
+        colSpan={10}
         className="border-b border-border-base bg-bg-surface px-3 py-3"
       >
         <div className="flex items-center gap-3 border-l-[3px] border-accent-primary pl-3">
@@ -447,6 +460,13 @@ function LineItemRow({
       <td className="border-b border-border-subtle px-3 py-2 text-center">
         <ConfidenceDot tone={tone} value={row.confidence} />
       </td>
+      <td className="border-b border-border-subtle px-2 py-2 text-center">
+        <MethodBadge
+          method={row.extractionMethod ?? null}
+          confidence={row.confidence}
+          costCents={row.costCents ?? 0}
+        />
+      </td>
       <td className="border-b border-border-subtle px-2 py-1">
         <CellInput
           value={row.species}
@@ -507,6 +527,60 @@ function LineItemRow({
         <FlagIndicator severity={severity} issues={issues} />
       </td>
     </tr>
+  );
+}
+
+// Extraction-method badge (Session Prompt 04). Subtle icon that lets
+// traders tell at a glance which rows came off a free parser path vs.
+// needed Claude help — the sparkles icon is the signal to give a row an
+// extra look before sending to vendors.
+const METHOD_META: Record<
+  ExtractionMethod,
+  { label: string; Icon: LucideIcon }
+> = {
+  excel_parse: { label: 'Excel parse', Icon: Sheet },
+  csv_parse: { label: 'CSV parse', Icon: Sheet },
+  docx_parse: { label: 'DOCX parse', Icon: FileText },
+  pdf_direct: { label: 'PDF text', Icon: FileText },
+  ocr: { label: 'OCR scan', Icon: ScanLine },
+  email_text: { label: 'Email text', Icon: FileText },
+  direct_text: { label: 'Pasted text', Icon: FileText },
+  claude_extraction: { label: 'AI cleanup', Icon: Sparkles },
+};
+
+function MethodBadge({
+  method,
+  confidence,
+  costCents,
+}: {
+  method: ExtractionMethod | null;
+  confidence: number;
+  costCents: number;
+}) {
+  if (!method) {
+    // Legacy rows without an extraction_method stamp. Render a neutral
+    // placeholder so the column doesn't jitter between rows.
+    return (
+      <span className="inline-block h-4 w-4" aria-hidden="true" />
+    );
+  }
+  const meta = METHOD_META[method];
+  const Icon = meta.Icon;
+  const isClaude = method === 'claude_extraction';
+  const tooltip = `${meta.label} · ${Math.round(confidence * 100)}% · ${
+    costCents > 0 ? `${costCents.toFixed(2)}¢` : 'free'
+  }`;
+  return (
+    <span
+      aria-label={tooltip}
+      title={tooltip}
+      className={cn(
+        'inline-flex h-5 w-5 items-center justify-center',
+        isClaude ? 'text-accent-primary' : 'text-text-tertiary',
+      )}
+    >
+      <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+    </span>
   );
 }
 

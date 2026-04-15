@@ -245,12 +245,31 @@ export async function extractionAgent(
   );
 
   if (!toolUse) {
+    // Log the raw response so we can see what Claude returned instead.
+    console.error('[extraction-agent] no tool_use block found', {
+      stopReason: response.stop_reason,
+      blockTypes: blocks.map((b) => b.type),
+      blocks: JSON.stringify(blocks).slice(0, 2000),
+    });
     throw new Error(
       'extractionAgent: Claude did not invoke extract_lumber_list tool',
     );
   }
 
-  return postProcess(toolUse.input as RawExtractionResult);
+  const raw = toolUse.input as RawExtractionResult;
+
+  console.log('[extraction-agent] tool_use.input summary', {
+    extraction_confidence: raw.extraction_confidence,
+    building_groups_count: Array.isArray(raw.building_groups)
+      ? raw.building_groups.length
+      : 'NOT_ARRAY',
+    first_group_tag: raw.building_groups?.[0]?.building_tag ?? 'none',
+    first_group_line_count: raw.building_groups?.[0]?.line_items?.length ?? 0,
+    total_line_items: raw.total_line_items,
+    total_board_feet: raw.total_board_feet,
+  });
+
+  return postProcess(raw);
 }
 
 // -----------------------------------------------------------------------------
@@ -425,4 +444,264 @@ function clamp01(n: number): number {
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
+}
+
+// =============================================================================
+// Mode B — targeted cleanup
+// =============================================================================
+//
+// Session Prompt 04 tiered ingest engine. When the deterministic lumber-
+// parser returns an overall confidence in the borderline band (0.60–0.92)
+// we don't want to pay for a full-document Claude extraction — we only
+// want to fix the specific lines the parser gave up on. Mode B does
+// exactly that: pass the already-parsed high-confidence groups as
+// grounding context so Claude preserves building tags, plus the short
+// list of flagged rows with their raw source text and partial parse, and
+// ask Claude to return clean line items for those rows only.
+//
+// Prompt design:
+//   - Abridged system prompt: no "extract everything" rhetoric, just
+//     "clean these specific lines".
+//   - Grounding context keeps the building tags Claude saw in the high-
+//     confidence groups so it doesn't invent new buildings.
+//   - Forced tool_use keeps output JSON-safe.
+//   - max_tokens 1024 — each fix is a handful of field values, not a
+//     full takeoff.
+
+/** Sonnet 4.6 list pricing (cents per 1M tokens). */
+const SONNET_INPUT_CENTS_PER_MTOK = 300; // $3 / Mtok
+const SONNET_OUTPUT_CENTS_PER_MTOK = 1500; // $15 / Mtok
+
+export interface ModeBLowConfidenceLine {
+  /** Building tag this flagged row belongs under. */
+  buildingTag: string;
+  /** Raw source text Claude should re-parse. */
+  originalText: string;
+  /**
+   * What the deterministic parser managed to pull off the row before
+   * giving up. Claude uses this as a starting point, not as gospel.
+   */
+  partialParse: Partial<ExtractedLineItem>;
+  /** Flags the parser attached to this row (missing_species etc.). */
+  flags: string[];
+}
+
+export interface ModeBInput {
+  /** Already-parsed groups that Claude should preserve verbatim. */
+  highConfidenceContext: ExtractedBuildingGroup[];
+  lowConfidenceLines: ModeBLowConfidenceLine[];
+  /**
+   * Multitenant isolation tag — not sent to Claude, but used for cost
+   * attribution when the orchestrator writes extraction_costs rows.
+   */
+  companyId: string;
+}
+
+export interface ModeBFixedLine {
+  buildingTag: string;
+  lineItem: ExtractedLineItem;
+}
+
+export interface ModeBResult {
+  fixedLines: ModeBFixedLine[];
+  /** Approximate Mode B spend in cents, computed from usage tokens. */
+  costCents: number;
+}
+
+const MODE_B_SYSTEM_PROMPT = `You are a lumber list cleanup agent. A deterministic parser has already extracted most of this bid cleanly. Your job is narrow: take the SHORT LIST of flagged rows below and return a clean line item for each one. You are NOT re-extracting the whole document.
+
+For each flagged row you receive:
+- Use the raw source text to recover any missing species / dimension / grade / length / quantity / unit.
+- Preserve the building_tag exactly as given — do not invent new groups.
+- Canonicalize species to: SPF, DF, HF, SYP, Cedar, LVL, OSB, Plywood, Treated.
+- Canonicalize grade to: #1, #2, #3, Stud, Select Structural, MSR, or panel/engineered grades as-written.
+- Unit must be PCS, MBF, or MSF.
+- Confidence 0.0–1.0 — how confident you are about the fix.
+- Flags: array of tokens from {ambiguous_species, missing_grade, unclear_quantity, unusual_dimension, unit_inferred, engineered_without_grade}. Empty array if nothing is off.
+
+Output ONLY via the fix_flagged_lines tool with the complete list of fixes. The high-confidence context is provided so you can ground building tags — do not try to re-parse it.`;
+
+const MODE_B_TOOL: LocalTool = {
+  name: 'fix_flagged_lines',
+  description:
+    'Emit clean line items for the flagged rows. Call exactly once with one fix per flagged line.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      fixes: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            building_tag: { type: 'string' },
+            species: { type: 'string' },
+            dimension: { type: 'string' },
+            grade: { type: 'string' },
+            length: { type: 'string' },
+            quantity: { type: 'number' },
+            unit: { type: 'string', enum: ['PCS', 'MBF', 'MSF'] },
+            board_feet: { type: 'number' },
+            confidence: { type: 'number' },
+            flags: { type: 'array', items: { type: 'string' } },
+            original_text: { type: 'string' },
+          },
+          required: [
+            'building_tag',
+            'species',
+            'dimension',
+            'grade',
+            'length',
+            'quantity',
+            'unit',
+            'board_feet',
+            'confidence',
+            'flags',
+            'original_text',
+          ],
+        },
+      },
+    },
+    required: ['fixes'],
+  },
+};
+
+/**
+ * Mode B — targeted cleanup. Runs a cheap Claude call on just the
+ * flagged rows, using the surrounding high-confidence groups as
+ * grounding context so building tags stay consistent. Returns the
+ * fixes plus the approximate cost of the call so the orchestrator can
+ * record it in extraction_costs.
+ */
+export async function extractionAgentTargetedCleanup(
+  input: ModeBInput,
+): Promise<ModeBResult> {
+  if (input.lowConfidenceLines.length === 0) {
+    return { fixedLines: [], costCents: 0 };
+  }
+
+  const anthropic = getAnthropic();
+
+  const contextPreview = input.highConfidenceContext
+    .map((group) => {
+      const exemplar = group.lineItems
+        .slice(0, 2)
+        .map(
+          (li) =>
+            `${li.quantity} ${li.unit} ${li.dimension} ${li.species} ${li.grade}`.trim(),
+        )
+        .join(' / ');
+      return `- ${group.buildingTag}${group.phaseNumber != null ? ` (Phase ${group.phaseNumber})` : ''}: ${exemplar || '(no sample lines)'}`;
+    })
+    .join('\n');
+
+  const flaggedBlocks = input.lowConfidenceLines
+    .map((line, index) => {
+      const partial = line.partialParse;
+      const partialSummary = [
+        partial.species && `species=${partial.species}`,
+        partial.dimension && `dimension=${partial.dimension}`,
+        partial.grade && `grade=${partial.grade}`,
+        partial.length && `length=${partial.length}`,
+        partial.quantity != null && `quantity=${partial.quantity}`,
+        partial.unit && `unit=${partial.unit}`,
+      ]
+        .filter(Boolean)
+        .join(', ');
+
+      return [
+        `--- flagged_line ${index} ---`,
+        `building_tag: ${line.buildingTag}`,
+        `original_text: ${line.originalText}`,
+        `parser_flags: ${line.flags.join(', ') || '(none)'}`,
+        `partial_parse: ${partialSummary || '(empty)'}`,
+      ].join('\n');
+    })
+    .join('\n\n');
+
+  const userText = [
+    '# High-confidence context (for grounding only — do not re-parse):',
+    contextPreview || '(no context)',
+    '',
+    '# Flagged rows to fix:',
+    flaggedBlocks,
+    '',
+    `Return exactly ${input.lowConfidenceLines.length} fixes via the fix_flagged_lines tool.`,
+  ].join('\n');
+
+  const response = await anthropic.messages.create({
+    model: LMBR_DEFAULT_MODEL,
+    max_tokens: 1024,
+    system: MODE_B_SYSTEM_PROMPT,
+    tools: [MODE_B_TOOL] as never,
+    tool_choice: { type: 'tool', name: MODE_B_TOOL.name } as never,
+    messages: [{ role: 'user', content: userText }],
+  });
+
+  const usage = response.usage;
+  const costCents = usage
+    ? (usage.input_tokens / 1_000_000) * SONNET_INPUT_CENTS_PER_MTOK +
+      (usage.output_tokens / 1_000_000) * SONNET_OUTPUT_CENTS_PER_MTOK
+    : 0;
+
+  type ResponseBlock =
+    | { type: 'tool_use'; id: string; name: string; input: unknown }
+    | { type: 'text'; text: string }
+    | { type: string; [key: string]: unknown };
+
+  const blocks = (response.content ?? []) as ResponseBlock[];
+  const toolUse = blocks.find(
+    (b): b is Extract<ResponseBlock, { type: 'tool_use' }> =>
+      b.type === 'tool_use' && b.name === MODE_B_TOOL.name,
+  );
+
+  if (!toolUse) {
+    console.warn('[extraction-agent] Mode B: no tool_use block', {
+      stopReason: response.stop_reason,
+      blockTypes: blocks.map((b) => b.type),
+    });
+    return { fixedLines: [], costCents };
+  }
+
+  interface RawFix {
+    building_tag: string;
+    species: string;
+    dimension: string;
+    grade: string;
+    length: string;
+    quantity: number;
+    unit: string;
+    board_feet: number;
+    confidence: number;
+    flags: string[];
+    original_text: string;
+  }
+  const parsed = toolUse.input as { fixes?: RawFix[] };
+  const rawFixes = Array.isArray(parsed.fixes) ? parsed.fixes : [];
+
+  const fixedLines: ModeBFixedLine[] = rawFixes.map((fix) => {
+    const lineItem: ExtractedLineItem = {
+      ...normalizeLineItem({
+        species: fix.species,
+        dimension: fix.dimension,
+        grade: fix.grade,
+        length: fix.length,
+        quantity: fix.quantity,
+        unit: fix.unit,
+        board_feet: fix.board_feet,
+        confidence: fix.confidence,
+        flags: fix.flags,
+        original_text: fix.original_text,
+      }),
+      // Mode B produced these — tag them so downstream code and the
+      // review UI can show the "needed AI help" badge.
+      extractionMethod: 'claude_extraction',
+    };
+
+    return {
+      buildingTag: (fix.building_tag ?? '').trim() || 'Unassigned',
+      lineItem,
+    };
+  });
+
+  return { fixedLines, costCents };
 }

@@ -23,3 +23,7 @@ export * from './ocr';
 export * from './pdf';
 export * from './utils';
 export * from './lumber';
+export * from './attachment-analyzer';
+export * from './lumber-parser';
+export * from './cost-tracker';
+export * from './queue';

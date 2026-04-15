@@ -210,7 +210,40 @@ lmbr-ai/                          ← root
 | Component base | shadcn/ui | Web only |
 | Icons | lucide-react | |
 | Date handling | date-fns | |
+EXTRACTION PIPELINE (tiered — cheapest method first):
 
+Layer 0 — File type detection (free)
+Layer 1A — exceljs direct parse (Excel/CSV — free)
+Layer 1B — pdf-parse text extraction (text PDFs — free)
+Layer 1C — mammoth (DOCX — free)
+Layer 1D — Azure Document Intelligence OCR (scanned/image — $1.50/1k pages)
+Layer 2 — Claude Sonnet extraction (fallback only — fires when confidence < 0.92)
+Layer 3 — Claude Haiku QA agent (lightweight validation — 10x cheaper than Sonnet)
+
+Target: fewer than 15% of documents should reach Layer 2 (Claude extraction).
+Lumber lists in Excel or clean PDF format should never touch the LLM.
+
+Confidence threshold: 0.92 (env: EXTRACTION_CONFIDENCE_THRESHOLD)
+Extraction method is recorded on every line item (excel_parse / pdf_parse /
+docx_parse / ocr / claude_extraction) for cost monitoring.
+
+New packages required in packages/lib/:
+  - exceljs ^4.4.0
+  - pdf-parse ^1.1.1
+  - mammoth ^1.8.0
+  - @azure/ai-form-recognizer ^5.0.0
+
+New files:
+  packages/lib/src/lumber-parser.ts     — deterministic regex + structured parse
+  packages/lib/src/attachment-analyzer.ts — file type router (method selector)
+
+QA agent model: claude-haiku-4-5-20251001 (not sonnet)
+Extraction agent model: claude-sonnet-4-6 (fallback only)
+
+New env vars:
+  AZURE_DOC_INTELLIGENCE_ENDPOINT=
+  AZURE_DOC_INTELLIGENCE_KEY=
+  EXTRACTION_CONFIDENCE_THRESHOLD=0.92
 ---
 
 ## Package Naming Convention

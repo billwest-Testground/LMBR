@@ -204,7 +204,7 @@ export function normalizeLength(input: string | null | undefined): string {
   }
   // "8'", "8 ft", "8ft", "8" → "8"
   const numeric = trimmed.match(/^(\d+(?:\.\d+)?)\s*(?:'|ft|foot|feet)?$/i);
-  if (numeric) return numeric[1];
+  if (numeric && numeric[1] !== undefined) return numeric[1];
   return trimmed;
 }
 

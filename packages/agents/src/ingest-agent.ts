@@ -176,12 +176,16 @@ export async function ingestAgent(input: IngestInput): Promise<IngestResult> {
     extractionMime = 'image/jpeg';
   }
 
-  const extraction = await extractionAgent({
-    fileBytes: extractionBytes,
-    mimeType: extractionMime,
-    rawText: extractionText,
-    fileName: parsed.fileName,
-  });
+  // exactOptionalPropertyTypes is on — only attach keys that have real
+  // values so we don't pass explicit `undefined` through to the extraction
+  // agent's strict ExtractionInput.
+  const extractionInput: Parameters<typeof extractionAgent>[0] = {};
+  if (extractionBytes !== undefined) extractionInput.fileBytes = extractionBytes;
+  if (extractionMime !== undefined) extractionInput.mimeType = extractionMime;
+  if (extractionText !== undefined) extractionInput.rawText = extractionText;
+  if (parsed.fileName !== undefined) extractionInput.fileName = parsed.fileName;
+
+  const extraction = await extractionAgent(extractionInput);
 
   const qaReport = qaAgent({ extraction });
 
