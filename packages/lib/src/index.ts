@@ -22,3 +22,4 @@ export * from './outlook';
 export * from './ocr';
 export * from './pdf';
 export * from './utils';
+export * from './lumber';
