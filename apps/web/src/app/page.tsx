@@ -1,19 +1,18 @@
 /**
- * LMBR.ai public landing page.
+ * LMBR.ai root entry — hands off to /dashboard.
  *
- * Purpose:  The unauthenticated marketing / entry surface. Routes the
- *           visitor into the Trader / Buyer / Unified / Manager-Owner
- *           dashboards once signed in. Built by Worklighter for wholesale
- *           lumber distributors.
- * Inputs:   none.
- * Outputs:  React JSX landing surface (placeholder until design system).
- * Agent/API: none.
- * Imports:  none.
+ * Purpose:  The unauthenticated marketing surface is out of scope for the
+ *           console build. Hitting `/` routes the visitor to /dashboard,
+ *           where the middleware then takes over: authenticated users land
+ *           in the right console, and unauthenticated visitors get bounced
+ *           to /login.
  *
  * LMBR.ai — Enterprise AI bid automation for wholesale lumber distributors.
  * Built by Worklighter.
  */
 
+import { redirect } from 'next/navigation';
+
 export default function HomePage() {
-  return <div>Not implemented: HomePage</div>;
+  redirect('/dashboard');
 }

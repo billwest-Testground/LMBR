@@ -1,13 +1,13 @@
 /**
- * Supabase client factories — browser anon + server service-role.
+ * Supabase client factories — platform-agnostic anon + service-role.
  *
- * Purpose:  Exposes two Supabase clients for LMBR.ai: an anon-keyed client
- *           for browser/session-scoped reads, and a service-role admin
- *           client for server-side bypass (used by webhook handlers and
- *           background jobs that must write across RLS boundaries). All
- *           LMBR.ai data — companies, users, bids, line items, vendors,
- *           vendor_bids, quotes, market_prices, archive_entries — lives in
- *           Supabase Postgres.
+ * Purpose:  Exposes two Supabase clients that work from any runtime in the
+ *           LMBR.ai monorepo (web API routes, background jobs, mobile).
+ *           The browser/session-scoped SSR clients used by Next.js live in
+ *           apps/web/src/lib/supabase/* — those wrap @supabase/auth-helpers
+ *           so the anon client picks up the authenticated cookie session.
+ *           Use getSupabaseAdmin() only from trusted server contexts —
+ *           service-role bypasses RLS and must never ship to a client.
  * Inputs:   NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY,
  *           SUPABASE_SERVICE_ROLE_KEY.
  * Outputs:  getSupabaseClient(), getSupabaseAdmin().
@@ -20,14 +20,52 @@
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
-export function getSupabaseClient(): SupabaseClient {
-  throw new Error('Not implemented');
+function requireEnv(key: string): string {
+  const value = process.env[key];
+  if (!value || value.length === 0) {
+    throw new Error(
+      `LMBR.ai: missing required environment variable ${key}. ` +
+        `Populate it in .env.local (web) or the mobile runtime config.`,
+    );
+  }
+  return value;
 }
+
+let anonSingleton: SupabaseClient | null = null;
+
+export function getSupabaseClient(): SupabaseClient {
+  if (anonSingleton) return anonSingleton;
+  anonSingleton = createClient(
+    requireEnv('NEXT_PUBLIC_SUPABASE_URL'),
+    requireEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY'),
+    {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
+      },
+    },
+  );
+  return anonSingleton;
+}
+
+let adminSingleton: SupabaseClient | null = null;
 
 export function getSupabaseAdmin(): SupabaseClient {
-  throw new Error('Not implemented');
+  if (adminSingleton) return adminSingleton;
+  adminSingleton = createClient(
+    requireEnv('NEXT_PUBLIC_SUPABASE_URL'),
+    requireEnv('SUPABASE_SERVICE_ROLE_KEY'),
+    {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
+      },
+    },
+  );
+  return adminSingleton;
 }
 
-// Keep reference to the import so tree-shakers don't drop the type re-export.
 export type { SupabaseClient };
 export { createClient };

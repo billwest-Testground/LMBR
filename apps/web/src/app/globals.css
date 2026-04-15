@@ -1,9 +1,11 @@
 /*
  * LMBR.ai global stylesheet.
  *
- * Purpose:  Loads Tailwind layers and declares the LMBR.ai design-system
- *           CSS variable placeholders. The variable block will be replaced
- *           when the UI/UX design system is inserted.
+ * Purpose:  Loads Tailwind layers, publishes the LMBR.ai design-system
+ *           CSS variables (README §1–§4), and wires dark-first base
+ *           defaults on <html>/<body>. Every visual decision downstream
+ *           should reference these tokens instead of hard-coded colors.
+ *
  * LMBR.ai — Enterprise AI bid automation for wholesale lumber distributors.
  * Built by Worklighter.
  */
@@ -13,18 +15,116 @@
 @tailwind utilities;
 
 :root {
-  /* PLACEHOLDER — replace with final design system tokens. */
-  --lmbr-primary: #0b5d3b;
-  --lmbr-primary-fg: #ffffff;
-  --lmbr-accent: #c89b3c;
-  --lmbr-accent-fg: #111111;
-  --lmbr-ink: #111111;
-  --lmbr-paper: #fafaf7;
-  --lmbr-muted: #6b6b6b;
-  --lmbr-radius: 0.5rem;
+  /* Background surfaces — README §1 */
+  --color-bg-base: #0A0E0C;
+  --color-bg-surface: #111714;
+  --color-bg-elevated: #1A2120;
+  --color-bg-subtle: #1F2A27;
+
+  /* Borders */
+  --color-border-base: #1E2E29;
+  --color-border-subtle: #162420;
+  --color-border-strong: #2A4038;
+
+  /* Accents */
+  --color-accent-primary: #1DB87A;
+  --color-accent-secondary: #15926A;
+  --color-accent-tertiary: #0F6B4E;
+  --color-accent-glow: #4AE89A;
+  --color-accent-warm: #8FD44A;
+  --color-accent-warm-2: #C8E86A;
+
+  /* Text */
+  --color-text-primary: #F0EBE0;
+  --color-text-secondary: #A8B5AF;
+  --color-text-tertiary: #6B7C75;
+  --color-text-inverse: #0A0E0C;
+
+  /* Semantic */
+  --color-semantic-success: #1DB87A;
+  --color-semantic-warning: #E8A832;
+  --color-semantic-error: #E85448;
+  --color-semantic-info: #4A9EE8;
+
+  /* Elevation */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.04);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.06);
+  --shadow-accent: 0 0 0 2px rgba(29, 184, 122, 0.35);
+  --shadow-warm: 0 0 0 2px rgba(143, 212, 74, 0.30);
 }
 
-html,
-body {
-  height: 100%;
+@layer base {
+  html,
+  body {
+    height: 100%;
+    background-color: var(--color-bg-base);
+    color: var(--color-text-secondary);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    font-family: var(--font-sans), 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 14px;
+    line-height: 21px;
+  }
+
+  /* All prices / quantities / BF use tabular numerals — README §2 rule. */
+  .tabular,
+  input[type='number'],
+  .font-mono {
+    font-variant-numeric: tabular-nums;
+  }
+
+  ::selection {
+    background: rgba(29, 184, 122, 0.32);
+    color: var(--color-text-primary);
+  }
+
+  /* Autofill in dark mode — keep the bg-subtle tone instead of WebKit yellow. */
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover,
+  input:-webkit-autofill:focus {
+    -webkit-box-shadow: 0 0 0 1000px var(--color-bg-subtle) inset;
+    -webkit-text-fill-color: var(--color-text-primary);
+    caret-color: var(--color-text-primary);
+    transition: background-color 9999s ease-in-out 0s;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@layer components {
+  /*
+   * Status dot — colored pulse next to "extracting", "running QA", etc.
+   * Used inside status badges per README §7.
+   */
+  .status-dot {
+    @apply inline-block h-1.5 w-1.5 rounded-pill;
+  }
+  .status-dot-pulse {
+    @apply animate-pulse-dot;
+  }
+
+  /*
+   * Loading-dot trio for AI processing states — README §9.
+   */
+  .loading-dots > span {
+    @apply inline-block h-1 w-1 rounded-pill bg-accent-primary animate-pulse-dot;
+  }
+  .loading-dots > span:nth-child(2) {
+    animation-delay: 200ms;
+  }
+  .loading-dots > span:nth-child(3) {
+    animation-delay: 400ms;
+  }
 }

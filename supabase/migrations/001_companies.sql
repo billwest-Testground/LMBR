@@ -1,15 +1,24 @@
 -- =============================================================================
--- LMBR.ai migration 001 — companies + shared trigger function
+-- LMBR.ai migration 001 — companies (tenant root) + shared trigger function
 -- Built by Worklighter.
 --
--- Creates the tenant root table, the canonical `set_updated_at()` trigger
--- function used by every other LMBR.ai table, and the JWT helper functions
--- that back row-level security across the schema.
+-- The companies row is the multi-tenant anchor — every downstream LMBR.ai
+-- table carries a company_id foreign key and is gated by RLS off of it.
+--
+-- Helpers that drive the rest of RLS (current_company_id, has_role,
+-- is_manager_or_owner) live in 002 so they can reference public.users /
+-- public.roles, which do not exist until that migration runs. Companies
+-- RLS policies are therefore installed in 002 as well; this migration
+-- only enables RLS on the table and creates the canonical updated_at
+-- trigger function used by every LMBR.ai table.
 -- =============================================================================
 
 create extension if not exists "pgcrypto";
 create extension if not exists "uuid-ossp";
 
+-- -----------------------------------------------------------------------------
+-- Shared updated_at trigger function (reused by every LMBR.ai table).
+-- -----------------------------------------------------------------------------
 create or replace function public.set_updated_at()
 returns trigger
 language plpgsql
@@ -20,51 +29,37 @@ begin
 end;
 $$;
 
-create or replace function public.jwt_company_id()
-returns uuid
-language sql stable
-as $$ select nullif(auth.jwt() ->> 'company_id', '')::uuid $$;
-
+-- -----------------------------------------------------------------------------
+-- Enums
+-- -----------------------------------------------------------------------------
 do $$ begin
-  create type user_role as enum ('trader', 'buyer', 'trader_buyer', 'manager_owner');
+  create type company_plan as enum ('starter', 'professional', 'enterprise');
 exception when duplicate_object then null; end $$;
 
-create or replace function public.jwt_has_role(target user_role)
-returns boolean
-language sql stable
-as $$
-  select coalesce(
-    (select target::text = any(
-      string_to_array(coalesce(auth.jwt() ->> 'roles', ''), ',')
-    )),
-    false
-  )
-$$;
-
+-- -----------------------------------------------------------------------------
+-- companies
+-- -----------------------------------------------------------------------------
 create table if not exists public.companies (
   id uuid primary key default gen_random_uuid(),
   name text not null,
   slug text not null unique,
-  legal_name text,
-  timezone text not null default 'America/Los_Angeles',
-  default_margin_pct numeric(6,4) not null default 0.08,
-  manager_approval_threshold numeric(12,2) not null default 0,
-  random_lengths_subscription boolean not null default false,
-  address jsonb,
+  email_domain text,
+  outlook_tenant_id text,
+  outlook_client_id text,
+  plan company_plan not null default 'starter',
+  active boolean not null default true,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+create index if not exists companies_email_domain_idx on public.companies(email_domain);
+create index if not exists companies_active_idx on public.companies(active);
 
 drop trigger if exists trg_companies_updated_at on public.companies;
 create trigger trg_companies_updated_at
 before update on public.companies
 for each row execute function public.set_updated_at();
 
+-- RLS is enabled here; tenant-aware policies are installed in 002 once
+-- current_company_id() / is_manager_or_owner() exist.
 alter table public.companies enable row level security;
-
-drop policy if exists companies_select on public.companies;
-create policy companies_select on public.companies
-  for select using (id = public.jwt_company_id());
-drop policy if exists companies_update on public.companies;
-create policy companies_update on public.companies
-  for update using (id = public.jwt_company_id() and public.jwt_has_role('manager_owner'));
