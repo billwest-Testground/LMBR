@@ -1,19 +1,18 @@
 /**
- * Buyer dashboard — vendor solicitation + extraction queue.
+ * /dashboard/buyer — buyer queue dashboard.
  *
- * Purpose:  Primary surface for the Buyer role. Shows bids routed to this
- *           buyer, outstanding vendor bid requests, received-but-unextracted
- *           vendor responses, and the comparison matrix entry point. Data
- *           comes from Supabase filtered to assigned_buyer_id = user.id.
- * Inputs:   session.
- * Outputs:  Buyer dashboard JSX.
- * Agent/API: extraction-agent, routing-agent.
- * Imports:  @lmbr/types, @lmbr/lib.
+ * Purpose:  Dedicated buyer-only view. Renders the shared BuyerPanel
+ *           which lists every bid_routings row assigned to the current
+ *           user, joined with the parent bid metadata.
  *
  * LMBR.ai — Enterprise AI bid automation for wholesale lumber distributors.
  * Built by Worklighter.
  */
 
+import { BuyerPanel } from '../../../components/dashboard/buyer-panel';
+
+export const dynamic = 'force-dynamic';
+
 export default function BuyerDashboardPage() {
-  return <div>Not implemented: BuyerDashboardPage</div>;
+  return <BuyerPanel />;
 }
