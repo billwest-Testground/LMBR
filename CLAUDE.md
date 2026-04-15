@@ -21,6 +21,9 @@ reflect enterprise-grade quality.
 **Sister product:** Verilane.ai — same Worklighter platform architecture,
 built for the freight brokerage vertical.
 
+**Design docs** live in `docs/superpowers/specs/`.
+**Current active spec:** `2026-04-15-tiered-ingest-engine-design.md`
+
 ---
 
 ## The Problem We Solve
@@ -210,40 +213,49 @@ lmbr-ai/                          ← root
 | Component base | shadcn/ui | Web only |
 | Icons | lucide-react | |
 | Date handling | date-fns | |
-EXTRACTION PIPELINE (tiered — cheapest method first):
 
-Layer 0 — File type detection (free)
-Layer 1A — exceljs direct parse (Excel/CSV — free)
-Layer 1B — pdf-parse text extraction (text PDFs — free)
-Layer 1C — mammoth (DOCX — free)
-Layer 1D — Azure Document Intelligence OCR (scanned/image — $1.50/1k pages)
-Layer 2 — Claude Sonnet extraction (fallback only — fires when confidence < 0.92)
-Layer 3 — Claude Haiku QA agent (lightweight validation — 10x cheaper than Sonnet)
+### Extraction Pipeline (Tiered — Cheapest Method First)
 
-Target: fewer than 15% of documents should reach Layer 2 (Claude extraction).
-Lumber lists in Excel or clean PDF format should never touch the LLM.
+```
+Layer 0:  File type detection (free)
+Layer 1A: exceljs — Excel/CSV direct parse (free)
+Layer 1B: pdf-parse — text PDF extraction (free)
+Layer 1C: mammoth — DOCX extraction (free)
+Layer 1D: Azure Document Intelligence — scanned/image OCR
+          ($1.50 per 1,000 pages)
+Layer 2:  claude-sonnet-4-6 — fallback extraction only,
+          fires when confidence < 0.92
+          Mode A: full extraction (confidence < 0.60)
+          Mode B: targeted line cleanup (0.60 to 0.92)
+Layer 3:  claude-haiku-4-5-20251001 — QA borderline pass
+          and scan-back price matching only
+```
 
-Confidence threshold: 0.92 (env: EXTRACTION_CONFIDENCE_THRESHOLD)
-Extraction method is recorded on every line item (excel_parse / pdf_parse /
-docx_parse / ocr / claude_extraction) for cost monitoring.
+**Confidence threshold:** `0.92`
+**Env var:** `EXTRACTION_CONFIDENCE_THRESHOLD` (default `0.92`)
+**Target:** fewer than 15% of documents reach Layer 2
 
-New packages required in packages/lib/:
-  - exceljs ^4.4.0
-  - pdf-parse ^1.1.1
-  - mammoth ^1.8.0
-  - @azure/ai-form-recognizer ^5.0.0
+**Cost estimates:**
 
-New files:
-  packages/lib/src/lumber-parser.ts     — deterministic regex + structured parse
-  packages/lib/src/attachment-analyzer.ts — file type router (method selector)
+| Monthly bid volume | Est. extraction cost |
+|---|---|
+| 1,000 bids | ~$7.70 |
+| 5,000 bids | ~$38.50 |
+| 10,000 bids | ~$77.00 |
 
-QA agent model: claude-haiku-4-5-20251001 (not sonnet)
-Extraction agent model: claude-sonnet-4-6 (fallback only)
+vs. Claude-first baseline at 10k bids/month: ~$1,400 (**18x savings**).
 
-New env vars:
-  AZURE_DOC_INTELLIGENCE_ENDPOINT=
-  AZURE_DOC_INTELLIGENCE_KEY=
-  EXTRACTION_CONFIDENCE_THRESHOLD=0.92
+### Model Split (do not change without updating this section)
+
+```
+Mode A extraction (full doc):    claude-sonnet-4-6
+Mode B extraction (targeted):    claude-sonnet-4-6
+QA agent Haiku pass:             claude-haiku-4-5-20251001
+Scan-back price matcher:         claude-haiku-4-5-20251001
+LMBR_DEFAULT_MODEL:              claude-sonnet-4-6
+LMBR_FALLBACK_MODEL:             claude-opus-4-6
+```
+
 ---
 
 ## Package Naming Convention
@@ -253,12 +265,43 @@ All internal packages use the `@lmbr/` prefix:
 ```
 @lmbr/agents   — AI agents (ingest, QA, extraction, routing, pricing, comparison, market)
 @lmbr/types    — TypeScript types (bid, user, role, vendor, line-item, quote, market)
-@lmbr/lib      — Shared clients (anthropic.ts, supabase.ts, outlook.ts, ocr.ts, pdf.ts)
+@lmbr/lib      — Shared clients + tiered ingest primitives (see below)
 @lmbr/config   — Constants (commodities.ts, regions.ts, tax-rates.ts)
 ```
 
 Web and mobile apps import from these packages. Business logic lives
 in packages, never in apps.
+
+### `@lmbr/lib` — Shared Utilities
+
+Existing clients:
+- `anthropic.ts` — Anthropic SDK singleton + `LMBR_DEFAULT_MODEL` / `LMBR_FALLBACK_MODEL`
+- `supabase.ts` — anon + service-role client factories
+- `outlook.ts` — Microsoft Graph client
+- `pdf.ts` — PDF helpers
+- `lumber.ts` — species / dimension / grade / length / unit normalizers + board-foot math
+
+Tiered ingest primitives (Session Prompt 04):
+- `lumber-parser.ts`
+  - deterministic Excel / CSV / text lumber list parser
+  - reuses normalizers from `lumber.ts`, zero duplication
+  - returns `ParseResult` with per-line confidence scores
+  - `lowConfidenceLines[]` flat depth-first indices for Mode B targeting
+- `attachment-analyzer.ts`
+  - file type router; picks the cheapest extraction method per file
+  - returns `AttachmentAnalysisResult` with method + cost
+- `cost-tracker.ts`
+  - fire-and-forget extraction cost ledger
+  - writes to `extraction_costs` table (migration 015)
+  - tracks per bid: method, cost_cents, company_id
+- `queue.ts`
+  - Redis-optional BullMQ wrapper
+  - if `REDIS_URL` unset → falls back to sync in-request processing
+  - `enqueueOrRun()` / `createIngestWorker()`
+- `ocr.ts`
+  - Azure Document Intelligence client (real, not stub)
+  - prebuilt-layout model
+  - returns text + page count + confidence + cost_cents
 
 ---
 
@@ -292,8 +335,13 @@ in packages, never in apps.
 ## API Routes (Web)
 
 ```
-POST /api/ingest          ← file upload → extraction
-POST /api/extract         ← scan-back OCR
+POST /api/ingest   — tiered extraction orchestrator
+                     returns 202 (queued) or 200 (inline)
+                     body: { extraction, qa_report,
+                             extraction_report }
+POST /api/extract  — vendor scan-back price extraction
+                     OCR + Haiku price matcher
+                     for scanned vendor pricing sheets
 POST /api/qa              ← QA agent review
 POST /api/consolidate     ← apply consolidation mode
 POST /api/route-bid       ← routing engine
@@ -310,7 +358,10 @@ POST /api/webhook/outlook ← Graph API email webhook
 
 ## AI Agents (@lmbr/agents)
 
-All agents use `claude-sonnet-4-6`. Each agent is a single file
+All agents default to `claude-sonnet-4-6` unless otherwise
+specified. See Model Split section for exceptions —
+`qa-agent.ts` and scan-back price matching use
+`claude-haiku-4-5-20251001`. Each agent is a single file
 with a clear input/output contract.
 
 | Agent | Purpose |
@@ -416,6 +467,16 @@ MICROSOFT_REDIRECT_URI=
 BARCHART_API_KEY=
 TWELVEDATA_API_KEY=
 
+# Tiered ingest — Azure Document Intelligence (OCR layer 1D)
+AZURE_DOC_INTELLIGENCE_ENDPOINT=
+AZURE_DOC_INTELLIGENCE_KEY=
+
+# Tiered ingest — confidence cutoff for Claude fallback (default 0.92)
+EXTRACTION_CONFIDENCE_THRESHOLD=0.92
+
+# Tiered ingest — optional; omit for sync in-request fallback mode
+REDIS_URL=
+
 # App config
 NEXT_PUBLIC_APP_URL=
 NEXT_PUBLIC_APP_ENV=development
@@ -455,7 +516,10 @@ are Zod-validated schemas.
 **Agent calls:**
 ```typescript
 // Every Anthropic call:
-// - Uses claude-sonnet-4-6
+// - Uses claude-sonnet-4-6 by default (LMBR_DEFAULT_MODEL).
+//   Exception: qa-agent Haiku pass and scan-back price matcher
+//   use claude-haiku-4-5-20251001 explicitly.
+//   See Model Split in Tech Stack for the full mapping.
 // - max_tokens: 4096 minimum, higher for large extractions
 // - System prompt defines persona + output format
 // - User prompt contains the actual data
@@ -512,10 +576,10 @@ descriptive error. No `return null` for error cases. No silent failures.
 
 Track progress here as modules are completed:
 
-- [ ] Scaffold + monorepo setup
-- [ ] README.md — UI/UX design system loaded
-- [ ] PROMPT 01 — Supabase schema + auth
-- [ ] PROMPT 02 — Ingest engine
+- [x] Scaffold + monorepo setup
+- [x] README.md — UI/UX design system loaded
+- [x] PROMPT 01 — Supabase schema + auth
+- [x] PROMPT 02 — Ingest engine (tiered — rebuilt)
 - [ ] PROMPT 03 — Routing engine
 - [ ] PROMPT 04 — Consolidation controls
 - [ ] PROMPT 05 — Vendor bid collection
@@ -529,6 +593,30 @@ Track progress here as modules are completed:
 - [ ] Demo seed data
 - [ ] EAS mobile build
 - [ ] App Store submission
+
+---
+
+## Known Pre-existing Errors (deferred to Prompt 12)
+
+`apps/web` — 10 errors in 3 untouched files:
+
+- **`console-sidebar.tsx`** (lines 40-45, 75):
+  lucide-react `ForwardRefExoticComponent` vs `ComponentType`.
+  Root cause: `@types/react` version mismatch with lucide-react.
+  Fix: align `@types/react` or narrow local Icon component type.
+
+- **`bid-card.tsx:41`** + **`login/page.tsx:111`**:
+  Next.js `typedRoutes` `href` string vs `RouteImpl<string>`.
+  Fix: switch to `Route<>` typed hrefs or disable `typedRoutes`.
+
+`apps/mobile` — deferred per design doc §3.12:
+
+- NativeWind `className` errors in `scan.tsx`
+- `tailwind.config.ts` types missing
+- Fix: alongside Prompt 12 mobile polish pass
+
+None of these are in the ingest code path.
+**Do not fix during active feature prompts — address in Prompt 12.**
 
 ---
 
