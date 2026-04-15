@@ -27,6 +27,32 @@ import { z } from 'zod';
 export const LineItemUnitSchema = z.enum(['PCS', 'MBF', 'MSF']);
 export type LineItemUnit = z.infer<typeof LineItemUnitSchema>;
 
+// Tiered ingest engine (Session Prompt 04): how a given line made it into
+// the system. Excel/CSV/clean-PDF/DOCX/email are free parser paths, OCR is
+// Azure Document Intelligence at ~0.15 cents per page, and
+// claude_extraction covers both Mode A (full-doc Sonnet) and Mode B
+// (targeted cleanup) — the per-bid extraction_costs table splits those
+// two so threshold tuning has the data it needs.
+export const ExtractionMethodSchema = z.enum([
+  'excel_parse',
+  'csv_parse',
+  'docx_parse',
+  'pdf_direct',
+  'ocr',
+  'email_text',
+  'direct_text',
+  'claude_extraction',
+]);
+export type ExtractionMethod = z.infer<typeof ExtractionMethodSchema>;
+
+// Wider enum used only by the cost ledger. Splits the two Claude modes
+// and adds a bucket for the Haiku QA pass so per-phase spend is legible.
+export const CostMethodSchema = z.union([
+  ExtractionMethodSchema,
+  z.enum(['claude_mode_a', 'claude_mode_b', 'qa_llm']),
+]);
+export type CostMethod = z.infer<typeof CostMethodSchema>;
+
 export const LineItemSchema = z.object({
   id: z.string().uuid(),
   companyId: z.string().uuid(),
@@ -44,6 +70,9 @@ export const LineItemSchema = z.object({
   isConsolidated: z.boolean().default(false),
   originalLineItemId: z.string().uuid().nullable().optional(),
   sortOrder: z.number().int().nonnegative().default(0),
+  extractionMethod: ExtractionMethodSchema.nullable().optional(),
+  extractionConfidence: z.number().min(0).max(1).nullable().optional(),
+  costCents: z.number().min(0).nullable().optional(),
   createdAt: z.string().datetime(),
 });
 export type LineItem = z.infer<typeof LineItemSchema>;
@@ -64,6 +93,11 @@ export const ExtractedLineItemSchema = z.object({
   confidence: z.number().min(0).max(1),
   flags: z.array(z.string()),
   originalText: z.string(),
+  // Tiered ingest provenance. Optional on the extracted shape so existing
+  // code paths that don't yet set them still type-check; the orchestrator
+  // sets both before writing to line_items.
+  extractionMethod: ExtractionMethodSchema.optional(),
+  costCents: z.number().min(0).optional(),
 });
 export type ExtractedLineItem = z.infer<typeof ExtractedLineItemSchema>;
 
