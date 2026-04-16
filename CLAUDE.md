@@ -303,6 +303,17 @@ Tiered ingest primitives (Session Prompt 04):
   - prebuilt-layout model
   - returns text + page count + confidence + cost_cents
 
+Vendor submission helpers (Session Prompt 05):
+- `vendor-token.ts`
+  - HMAC-SHA256 signed stateless tokens for `/vendor-submit/[token]`
+  - payload includes `expiresAt` — verifier rejects expired tokens
+  - `createVendorBidToken()` throws if `VENDOR_TOKEN_SECRET` is unset
+- `vendor-visibility.ts`
+  - `vendorVisibleIsConsolidatedFlag(mode)` — single source of truth
+    for whether a consolidation mode shows vendors a consolidated
+    tally vs. the structured building breakdown
+  - used by dispatch, PDF render, and public submit page
+
 ---
 
 ## Database Schema (Supabase)
@@ -317,7 +328,10 @@ Tiered ingest primitives (Session Prompt 04):
 - `bids` — full bid lifecycle with status enum
 - `line_items` — extracted lumber items with building/phase grouping
 - `vendors` — company vendor list with commodity + region assignments
-- `vendor_bids` — dispatch records per vendor per bid
+- `vendor_bids` — dispatch records per vendor per bid; includes
+  `token text` + `token_expires_at timestamptz` columns added in
+  migration `017_vendor_bid_tokens.sql` to support the stateless
+  public `/vendor-submit/[token]` flow
 - `vendor_bid_line_items` — individual vendor prices per line
 - `quotes` — approved output with margin + tax calculations
 - `quote_line_items` — sell-price view of selected vendor pricing
@@ -335,23 +349,32 @@ Tiered ingest primitives (Session Prompt 04):
 ## API Routes (Web)
 
 ```
-POST /api/ingest   — tiered extraction orchestrator
-                     returns 202 (queued) or 200 (inline)
-                     body: { extraction, qa_report,
-                             extraction_report }
-POST /api/extract  — vendor scan-back price extraction
-                     OCR + Haiku price matcher
-                     for scanned vendor pricing sheets
-POST /api/qa              ← QA agent review
-POST /api/consolidate     ← apply consolidation mode
-POST /api/route-bid       ← routing engine
-POST /api/vendors         ← vendor dispatch
-POST /api/compare         ← build comparison matrix
-POST /api/margin          ← apply margin instructions
-POST /api/quote           ← generate PDF quote
-GET  /api/market          ← market price data
+POST /api/ingest           — tiered extraction orchestrator
+                              returns 202 (queued) or 200 (inline)
+                              body: { extraction, qa_report,
+                                      extraction_report }
+POST /api/extract          — vendor scan-back price extraction
+                              multipart upload → Azure OCR + Haiku
+                              matcher → writes vendor_bid_line_items
+POST /api/qa               ← QA agent review
+POST /api/consolidate      ← apply consolidation mode
+POST /api/route-bid        ← routing engine
+GET  /api/vendors          ← list company vendors
+POST /api/vendors          ← create vendor (CRUD — real, not stub)
+POST /api/vendors/dispatch ← mint signed tokens + create vendor_bids
+                              for each selected vendor on a bid
+POST /api/vendors/nudge    ← STUB today; returns { ok, stubbed: true }
+                              Graph API sendmail lands in Prompt 08
+POST /api/vendor-submit    ← public submission endpoint (token-auth)
+                              accepts digital-form line prices
+GET  /vendor-submit/[token]       ← public vendor web form (no auth)
+GET  /vendor-submit/[token]/print ← React-PDF printable tally
+POST /api/compare          ← build comparison matrix
+POST /api/margin           ← apply margin instructions
+POST /api/quote            ← generate PDF quote
+GET  /api/market           ← market price data
 POST /api/market/budget-quote ← AI budget estimate
-POST /api/webhook/outlook ← Graph API email webhook
+POST /api/webhook/outlook  ← Graph API email webhook
 ```
 
 ---
@@ -374,6 +397,7 @@ with a clear input/output contract.
 | `comparison-agent.ts` | Ranks vendor pricing, suggests selection |
 | `pricing-agent.ts` | Aggregates market data, analyzes archive |
 | `market-agent.ts` | Generates budget quotes from market data |
+| `scanback-agent.ts` | Matches handwritten OCR prices back to expected line_items (Haiku). |
 
 **Extraction output format** (know this — it flows through the entire system):
 
@@ -476,6 +500,11 @@ EXTRACTION_CONFIDENCE_THRESHOLD=0.92
 
 # Tiered ingest — optional; omit for sync in-request fallback mode
 REDIS_URL=
+
+# Vendor submission tokens — HMAC secret for the public /vendor-submit/[token] flow
+# MUST be set in production. Without it, createVendorBidToken throws at dispatch time,
+# which means POST /api/vendors/dispatch will fail before any vendor bid is created.
+VENDOR_TOKEN_SECRET=
 
 # App config
 NEXT_PUBLIC_APP_URL=
@@ -582,10 +611,20 @@ Track progress here as modules are completed:
 - [x] PROMPT 02 — Ingest engine (tiered — rebuilt)
 - [x] PROMPT 03 — Routing engine
 - [x] PROMPT 04 — Consolidation controls
-- [ ] PROMPT 05 — Vendor bid collection
+- [x] PROMPT 05 — Vendor bid collection
 - [ ] PROMPT 06 — Comparison matrix
 - [ ] PROMPT 07 — Margin stacking + quote output
 - [ ] PROMPT 08 — Outlook integration
+    - **Prompt 08 hand-off notes:** `POST /api/vendors/nudge` is a stub
+      today (returns `{ ok: true, stubbed: true }`) — wire it to Graph
+      API sendmail. `vendor_bids.raw_response_url` stays `null` today;
+      Prompt 08 should upload scan-back files to object storage and
+      populate it before flipping status so re-OCR is possible.
+      `TALLY_TIMEZONE` is hardcoded to `'America/New_York'` in
+      `apps/web/src/lib/format-datetime.ts`; when the `companies.timezone`
+      column ships, thread it through the render props. Cost ledger
+      TODO: add `'scanback_llm'` enum value to `CostMethodSchema`
+      (currently aliased as `'qa_llm'` in `/api/extract`).
 - [ ] PROMPT 09 — Market intelligence layer
 - [ ] PROMPT 10 — Archive + knowledge base
 - [ ] PROMPT 11 — Settings + company config
@@ -598,7 +637,7 @@ Track progress here as modules are completed:
 
 ## Known Pre-existing Errors (deferred to Prompt 12)
 
-`apps/web` — 10 errors in 3 untouched files:
+`apps/web` — 9 errors in 3 untouched files:
 
 - **`console-sidebar.tsx`** (lines 40-45, 75):
   lucide-react `ForwardRefExoticComponent` vs `ComponentType`.
