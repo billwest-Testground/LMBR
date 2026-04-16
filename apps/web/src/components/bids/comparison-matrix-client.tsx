@@ -1,6 +1,6 @@
 /**
- * ComparisonMatrixClient — client-side wrapper that owns the
- * onExportSelection callback for the server-rendered compare page.
+ * ComparisonMatrixClient — client-side wrapper that routes exported
+ * vendor selections into the margin-stacking workspace.
  *
  * Purpose:  The compare page is a Next.js server component (auth + data
  *           loading live there), but <ComparisonMatrix> is a client
@@ -9,16 +9,16 @@
  *           `result` prop across the RSC boundary and hand the interactive
  *           callback off to a real client-side function.
  *
- *           Prompt 07 hand-off: when the margin-stacking endpoint lands,
- *           replace the console.info with a POST to the selection-save
- *           route. Today we log + `window.alert` so the trader gets
- *           tangible feedback the click was received.
+ *           On export we stash the selection in sessionStorage (via
+ *           lib/margin/selection-stash) under a bidId-scoped key, then
+ *           navigate to /bids/[bidId]/margin. The margin page reads it
+ *           on mount so we don't burn a server round-trip for a payload
+ *           that only needs to live for ~30 seconds.
  *
  * Inputs:   { result }.
  * Outputs:  JSX.
- * Agent/API: none — logs a stub "saved" action until Prompt 07 ships the
- *           margin-stacking persistence endpoint.
- * Imports:  ./comparison-matrix.
+ * Agent/API: none — client-side navigation + sessionStorage.
+ * Imports:  next/navigation, ./comparison-matrix, ../../lib/margin/selection-stash.
  *
  * LMBR.ai — Enterprise AI bid automation for wholesale lumber distributors.
  * Built by Worklighter.
@@ -27,6 +27,7 @@
 'use client';
 
 import * as React from 'react';
+import { useRouter } from 'next/navigation';
 
 import type { ComparisonResult } from '@lmbr/agents';
 
@@ -34,32 +35,33 @@ import {
   ComparisonMatrix,
   type ExportedSelection,
 } from './comparison-matrix';
+import { writeMarginSelection } from '../../lib/margin/selection-stash';
 
 export interface ComparisonMatrixClientProps {
   result: ComparisonResult;
 }
 
 export function ComparisonMatrixClient({ result }: ComparisonMatrixClientProps) {
-  const handleExport = React.useCallback((selection: ExportedSelection[]) => {
-    // Prompt 07 hand-off — replace with a fetch('/api/margin/stacking',
-    // { method: 'POST', body: JSON.stringify({ bidId, selection }) }) when
-    // the margin-stacking route lands. For now, surface the payload so
-    // the trader knows the click was captured and QA has a console trail.
-    // eslint-disable-next-line no-console
-    console.info('[compare] export selection', {
-      bidId: result.bidId,
-      count: selection.length,
-      selection,
-    });
-    if (typeof window !== 'undefined') {
-      window.alert(
-        `Selection captured — ${selection.length} line${
-          selection.length === 1 ? '' : 's'
-        }. ` +
-          'Margin-stacking persistence lands in Prompt 07. See console for the full payload.',
+  const router = useRouter();
+
+  const handleExport = React.useCallback(
+    (selection: ExportedSelection[]) => {
+      // Stash the client-side selection so the margin page can read it on
+      // mount without a server round-trip, then push the trader forward.
+      writeMarginSelection(
+        result.bidId,
+        selection.map((s) => ({
+          lineItemId: s.lineItemId,
+          vendorId: s.vendorId,
+          vendorBidLineItemId: s.vendorBidLineItemId,
+          unitPrice: s.unitPrice,
+          totalPrice: s.totalPrice,
+        })),
       );
-    }
-  }, [result.bidId]);
+      router.push(`/bids/${result.bidId}/margin`);
+    },
+    [result.bidId, router],
+  );
 
   return <ComparisonMatrix result={result} onExportSelection={handleExport} />;
 }
