@@ -51,7 +51,13 @@
       "Bash(awk -F':' '{print $1}')",
       "Bash(pnpm -C packages/agents type-check)",
       "Bash(pnpm *)",
-      "Bash(npx next *)"
+      "Bash(npx next *)",
+      "Bash(./node_modules/.bin/tsx scripts/verify-pdf-render.mjs)",
+      "Bash(mv scripts/verify-pdf-render.mjs scripts/verify-pdf-render.ts)",
+      "Bash(./node_modules/.bin/tsx scripts/verify-pdf-render.ts)",
+      "Bash(node -e \"require.resolve\\('tsx'\\); console.log\\('ok'\\)\")",
+      "Bash(node -e ' *)",
+      "Bash(unset SESSION_COOKIE)"
     ]
   }
 }
