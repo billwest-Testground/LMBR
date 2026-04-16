@@ -66,6 +66,21 @@ export const runtime = 'nodejs';
 // was wrong, the row was missing, or the payload mismatched the row.
 const GENERIC_AUTH_ERROR = 'Submission link is invalid or has expired.';
 
+// Generic error surfaced for closed-status rows (expired or declined). Same
+// rationale as GENERIC_AUTH_ERROR — the client does not need to know which
+// specific closed state the row is in; ops gets the distinction via
+// console.warn. Returned with HTTP 409 (conflict / resource in a state that
+// precludes the requested action).
+const GENERIC_CLOSED_ERROR = 'This submission link is closed.';
+
+// Re-submission policy:
+//   - status === 'submitted' accepts a new POST: vendors correct pricing
+//     after initial submit (common in practice; mill reps often refresh
+//     a quote the next morning). The upsert is idempotent on
+//     (vendor_bid_id, line_item_id), so resubmit overwrites cleanly.
+//   - status === 'partial' accepts new POSTs same as above.
+//   - status in ('expired','declined') is closed → 409.
+
 const BodySchema = z.object({
   token: z.string().min(1),
   action: z.enum(['submit', 'decline']),
@@ -163,15 +178,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     // --- Closed statuses ---------------------------------------------------
-    if (vendorBid.status === 'expired') {
-      return NextResponse.json(
-        { error: 'This submission link has expired.' },
-        { status: 409 },
+    // Both 'expired' and 'declined' collapse to the same generic 409 body so
+    // the client cannot distinguish the two. Specific cause is logged
+    // server-side for ops (mirrors the GENERIC_AUTH_ERROR / 401 pattern).
+    if (vendorBid.status === 'expired' || vendorBid.status === 'declined') {
+      console.warn(
+        `LMBR.ai vendor-submit: POST rejected because vendor_bids.status='${vendorBid.status}' (id=${vendorBid.id}).`,
       );
-    }
-    if (vendorBid.status === 'declined') {
       return NextResponse.json(
-        { error: 'This submission has been declined and is closed.' },
+        { error: GENERIC_CLOSED_ERROR },
         { status: 409 },
       );
     }
@@ -281,6 +296,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       if (typeof p.unitPrice === 'number') {
         const qty = quantityByLineId.get(p.lineItemId) ?? 0;
         const total = p.unitPrice * qty;
+        // total_price column is numeric(14,2); rounding to 2dp in JS before insert
+        // so the stored value matches the displayed value and buyer-side comparison
+        // math reads the same number it will eventually quote. unit_price stays at
+        // 4dp (column precision) — only the total is cents-bucketed.
         toUpsert.push({
           company_id: vendorBid.company_id,
           vendor_bid_id: vendorBid.id,
@@ -344,6 +363,21 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       );
     }
     const pricedCount = (pricedData ?? []).length;
+
+    // Reject a 'submit' action that did not produce a single priced row. The
+    // vendor did not actually submit anything — flipping the row to 'partial'
+    // with a submitted_at timestamp would be a data-quality lie. Leave the
+    // row in its previous status so the vendor can return and try again.
+    if (pricedCount === 0) {
+      return NextResponse.json(
+        {
+          error:
+            'Enter at least one price, or use Decline to bid to decline the entire RFQ.',
+        },
+        { status: 400 },
+      );
+    }
+
     const status: 'submitted' | 'partial' =
       pricedCount >= expectedCount && expectedCount > 0 ? 'submitted' : 'partial';
 

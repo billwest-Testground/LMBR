@@ -50,6 +50,12 @@ import type { ConsolidationMode } from '@lmbr/types';
 
 import { SubmitForm, type SubmitFormLineItem, type SubmitFormExistingPrice } from './submit-form';
 
+// Note: BidRow still carries `consolidation_mode` because the server needs it
+// to pick the vendor-visible line-item set (consolidated vs. originals). It is
+// intentionally NOT forwarded into the `bidSummary` prop sent to the client —
+// the vendor does not need to know (and must not see) the buyer's
+// consolidation strategy choice.
+
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
@@ -237,7 +243,6 @@ export default async function VendorSubmitPage({ params }: PageProps) {
     customerName: bid.customer_name,
     jobAddress: bid.job_address,
     dueDate: bid.due_date,
-    consolidationMode: bid.consolidation_mode,
     lineCount: lineItems.length,
   };
 
@@ -300,7 +305,6 @@ interface BidSummary {
   customerName: string;
   jobAddress: string | null;
   dueDate: string | null;
-  consolidationMode: ConsolidationMode;
   lineCount: number;
 }
 

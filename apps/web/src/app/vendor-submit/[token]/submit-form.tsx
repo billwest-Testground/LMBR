@@ -34,8 +34,6 @@ import * as React from 'react';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 
-import type { ConsolidationMode } from '@lmbr/types';
-
 import { Button } from '../../../components/ui/button';
 import { Input } from '../../../components/ui/input';
 
@@ -62,7 +60,6 @@ interface BidSummary {
   customerName: string;
   jobAddress: string | null;
   dueDate: string | null;
-  consolidationMode: ConsolidationMode;
   lineCount: number;
 }
 
