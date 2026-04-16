@@ -28,3 +28,4 @@ export * from './lumber-parser';
 export * from './cost-tracker';
 export * from './queue';
 export * from './vendor-token';
+export * from './vendor-visibility';
