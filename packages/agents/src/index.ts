@@ -22,3 +22,4 @@ export * from './routing-agent';
 export * from './pricing-agent';
 export * from './comparison-agent';
 export * from './market-agent';
+export * from './consolidation-agent';
