@@ -41,7 +41,7 @@ import * as React from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ShieldAlert, Sparkles, Users, Eraser, DollarSign } from 'lucide-react';
 
-import type { ComparisonResult, ComparisonRow } from '@lmbr/agents';
+import type { ComparisonCell, ComparisonResult, ComparisonRow } from '@lmbr/agents';
 
 import { Button } from '../ui/button';
 import { cn } from '../../lib/cn';
@@ -95,6 +95,14 @@ const USD = new Intl.NumberFormat('en-US', {
 const UNIT = new Intl.NumberFormat('en-US', {
   minimumFractionDigits: 2,
   maximumFractionDigits: 4,
+});
+
+// Spread amounts are a bucket-of-cents summary — 2 decimals is plenty.
+// Unit prices (UNIT above) keep 4 fraction digits because lumber quotes
+// routinely carry $0.0025-level precision.
+const SPREAD = new Intl.NumberFormat('en-US', {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
 });
 
 function formatLineLabel(row: ComparisonRow): { top: string; bottom: string } {
@@ -152,6 +160,14 @@ export function ComparisonMatrix({
     overscan: 8,
   });
 
+  // lineItemId -> row index, memoised separately from selection-derived totals
+  // so the 400-entry Map is only rebuilt when `rows` actually changes.
+  const rowById = React.useMemo(() => {
+    const map = new Map<string, ComparisonRow>();
+    for (const r of rows) map.set(r.lineItemId, r);
+    return map;
+  }, [rows]);
+
   // --- Derived numbers (memoised) ------------------------------------------
   // Selected total uses each selection's recorded totalPrice.
   // Savings vs worst = Σ per selected line of (worstUnitPrice - selectedUnitPrice) × quantity,
@@ -162,9 +178,6 @@ export function ComparisonMatrix({
     let total = 0;
     let savings = 0;
     const vendorIds = new Set<string>();
-
-    const rowById = new Map<string, ComparisonRow>();
-    for (const r of rows) rowById.set(r.lineItemId, r);
 
     for (const [lineItemId, entry] of selection.entries()) {
       total += entry.totalPrice;
@@ -186,21 +199,36 @@ export function ComparisonMatrix({
       savingsVsHighest: savings,
       vendorCount: vendorIds.size,
     };
-  }, [rows, selection]);
+  }, [rowById, selection]);
 
   const selectedCount = selection.size;
 
   // --- Selection mutations --------------------------------------------------
+  // Stable callback (empty deps) so React.memo on MatrixRow can actually
+  // skip re-renders when an unrelated row's selection changes. The per-cell
+  // onClick closure is rebuilt inside MatrixRow only when that row itself
+  // re-renders — which is what we want.
   const toggleCell = React.useCallback(
-    (lineItemId: string, entry: SelectionEntry | null) => {
+    (lineItemId: string, cell: ComparisonCell) => {
+      if (
+        cell.vendorBidLineItemId === null ||
+        cell.unitPrice === null ||
+        cell.totalPrice === null ||
+        cell.declined
+      ) {
+        return;
+      }
+      const vendorBidLineItemId = cell.vendorBidLineItemId;
+      const entry: SelectionEntry = {
+        vendorId: cell.vendorId,
+        vendorBidLineItemId,
+        unitPrice: cell.unitPrice,
+        totalPrice: cell.totalPrice,
+      };
       setSelection((prev) => {
         const next = new Map(prev);
-        if (entry === null) {
-          next.delete(lineItemId);
-          return next;
-        }
         const current = next.get(lineItemId);
-        if (current && current.vendorBidLineItemId === entry.vendorBidLineItemId) {
+        if (current && current.vendorBidLineItemId === vendorBidLineItemId) {
           // Clicking the currently-selected cell deselects.
           next.delete(lineItemId);
         } else {
@@ -263,11 +291,14 @@ export function ComparisonMatrix({
 
   // --- Render ---------------------------------------------------------------
 
-  const totalGridWidth =
-    LINE_COL_WIDTH +
-    QTY_COL_WIDTH +
-    vendors.length * VENDOR_COL_WIDTH +
-    SUMMARY_COL_WIDTH;
+  const totalGridWidth = React.useMemo(
+    () =>
+      LINE_COL_WIDTH +
+      QTY_COL_WIDTH +
+      vendors.length * VENDOR_COL_WIDTH +
+      SUMMARY_COL_WIDTH,
+    [vendors.length],
+  );
 
   return (
     <div className="flex min-h-[60vh] flex-col gap-4">
@@ -340,8 +371,15 @@ export function ComparisonMatrix({
       <div className="overflow-hidden rounded-md border border-border-base bg-bg-surface shadow-sm">
         <div
           ref={scrollRef}
+          role="grid"
+          aria-rowcount={rows.length + 1}
+          aria-colcount={vendors.length + 3}
+          aria-label="Vendor comparison matrix"
           className="relative max-h-[60vh] min-h-[60vh] overflow-auto"
-          style={{ contain: 'strict' }}
+          // `contain: 'content'` = layout + paint + style. `strict` would
+          // also imply size containment, which requires explicit dimensions
+          // and can cause Safari to collapse the flex container.
+          style={{ contain: 'content' }}
         >
           {/* Header row (sticky) */}
           <MatrixHeader
@@ -368,8 +406,8 @@ export function ComparisonMatrix({
                 <MatrixRow
                   key={row.lineItemId}
                   row={row}
-                  selected={selected}
-                  onToggle={toggleCell}
+                  selectedVendorId={selected?.vendorId ?? null}
+                  onToggleCell={toggleCell}
                   top={virtualRow.start}
                   height={virtualRow.size}
                   totalGridWidth={totalGridWidth}
@@ -488,29 +526,42 @@ function HeaderCell({
 // Row
 // -----------------------------------------------------------------------------
 
-function MatrixRow({
-  row,
-  selected,
-  onToggle,
-  top,
-  height,
-  totalGridWidth,
-  vendorNameById,
-}: {
+interface MatrixRowProps {
   row: ComparisonRow;
-  selected: SelectionEntry | null;
-  onToggle: (lineItemId: string, entry: SelectionEntry | null) => void;
+  /** vendorId of the currently-selected cell for this row, or null. */
+  selectedVendorId: string | null;
+  /**
+   * Stable parent callback. Rebuilding the per-cell onClick closure here
+   * (instead of in the parent) is safe because React.memo keeps this row
+   * from re-rendering when its own props didn't change — so the closure
+   * is also reconstructed only when needed.
+   */
+  onToggleCell: (lineItemId: string, cell: ComparisonCell) => void;
   top: number;
   height: number;
   totalGridWidth: number;
   vendorNameById: Map<string, string>;
-}) {
+}
+
+const MatrixRow = React.memo(function MatrixRow({
+  row,
+  selectedVendorId,
+  onToggleCell,
+  top,
+  height,
+  totalGridWidth,
+  vendorNameById,
+}: MatrixRowProps) {
   const label = formatLineLabel(row);
 
   return (
     <div
       role="row"
-      className="absolute left-0 flex border-b border-border-subtle hover:bg-bg-subtle"
+      // `group` lets the sticky left/right columns (which must be opaque
+      // to cover the scrolling vendor cells underneath) still pick up the
+      // row-hover tint — otherwise the highlight has a visible seam where
+      // the sticky columns sit.
+      className="group absolute left-0 flex border-b border-border-subtle hover:bg-bg-subtle"
       style={{
         transform: `translateY(${top}px)`,
         height,
@@ -520,7 +571,7 @@ function MatrixRow({
       {/* Line summary (sticky left) */}
       <div
         role="cell"
-        className="sticky left-0 z-10 flex shrink-0 flex-col justify-center border-r border-border-subtle bg-bg-surface px-3"
+        className="sticky left-0 z-10 flex shrink-0 flex-col justify-center border-r border-border-subtle bg-bg-surface px-3 group-hover:bg-bg-subtle"
         style={{ width: LINE_COL_WIDTH, height }}
       >
         <span className="truncate font-mono text-body-sm text-text-primary">
@@ -543,21 +594,13 @@ function MatrixRow({
 
       {/* Vendor price cells */}
       {row.cells.map((cell) => {
-        const isSelected =
-          selected !== null && selected.vendorBidLineItemId === cell.vendorBidLineItemId;
+        const isSelected = selectedVendorId === cell.vendorId;
         const priced = cell.unitPrice !== null && !cell.declined;
         const vendorName = vendorNameById.get(cell.vendorId) ?? cell.vendorId;
 
         const onClick = () => {
-          if (!priced || cell.vendorBidLineItemId === null || cell.totalPrice === null) {
-            return;
-          }
-          onToggle(row.lineItemId, {
-            vendorId: cell.vendorId,
-            vendorBidLineItemId: cell.vendorBidLineItemId,
-            unitPrice: cell.unitPrice as number,
-            totalPrice: cell.totalPrice,
-          });
+          if (!priced) return;
+          onToggleCell(row.lineItemId, cell);
         };
 
         return (
@@ -571,6 +614,8 @@ function MatrixRow({
             disabled={!priced}
             className={cn(
               'flex shrink-0 items-center justify-end border-l border-border-subtle px-3 font-mono tabular-nums text-body-sm transition-colors duration-micro',
+              // Visible focus ring — keyboard users must see where they are
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-primary focus-visible:ring-offset-1 focus-visible:ring-offset-bg-surface',
               priced ? 'cursor-pointer' : 'cursor-default',
               // Base color states
               !priced && !cell.declined && 'text-text-tertiary',
@@ -601,14 +646,14 @@ function MatrixRow({
       {/* Row summary (sticky right) */}
       <div
         role="cell"
-        className="sticky right-0 z-10 flex shrink-0 flex-col justify-center border-l border-border-base bg-bg-surface px-3 text-right font-mono tabular-nums"
+        className="sticky right-0 z-10 flex shrink-0 flex-col justify-center border-l border-border-base bg-bg-surface px-3 text-right font-mono tabular-nums group-hover:bg-bg-subtle"
         style={{ width: SUMMARY_COL_WIDTH, height }}
       >
         <span className="text-body-sm text-text-primary">
           {row.bestUnitPrice !== null ? UNIT.format(row.bestUnitPrice) : '—'}
           {row.spreadAmount !== null && (
             <span className="ml-1 text-caption text-text-tertiary">
-              ±{UNIT.format(row.spreadAmount)}
+              ±{SPREAD.format(row.spreadAmount)}
             </span>
           )}
         </span>
@@ -618,7 +663,7 @@ function MatrixRow({
       </div>
     </div>
   );
-}
+});
 
 // -----------------------------------------------------------------------------
 // Running total bar
