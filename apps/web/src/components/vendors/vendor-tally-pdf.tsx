@@ -46,6 +46,8 @@ import {
 } from '@react-pdf/renderer';
 import React from 'react';
 
+import { formatDueByLabel, formatTimestampLabel } from '../../lib/format-datetime';
+
 // ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
@@ -192,7 +194,13 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   writeInCell: {
-    // Box the write-in columns so the vendor sees the target area.
+    // Box the write-in columns so the vendor sees the target area. Shaded
+    // background (plus the left divider) makes the write-in columns
+    // unmistakable on a printed sheet; the 4% grey prints cleanly on B&W
+    // laser printers without heavy toner use. Intentionally no
+    // top/right/bottom borders — they can interact oddly with wrap={false}
+    // and the fixed header row when @react-pdf paginates long tables.
+    backgroundColor: '#F5F5F5',
     borderLeftWidth: 0.5,
     borderColor: '#000000',
     paddingHorizontal: 3,
@@ -246,29 +254,17 @@ const styles = StyleSheet.create({
 // Formatting helpers
 // ---------------------------------------------------------------------------
 
+// formatDueBy + formatGeneratedAt now delegate to the shared
+// timezone-pinned helpers in ../../lib/format-datetime. Keeping the old
+// names as thin wrappers preserves the call sites below and documents
+// intent at the usage site.
+
 function formatDueBy(dueBy: string | null): string {
-  if (!dueBy) return 'Not specified';
-  const d = new Date(dueBy);
-  if (Number.isNaN(d.getTime())) return 'Not specified';
-  return d.toLocaleString('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  });
+  return formatDueByLabel(dueBy);
 }
 
 function formatGeneratedAt(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  });
+  return formatTimestampLabel(iso);
 }
 
 function formatQty(qty: number): string {
@@ -365,10 +361,10 @@ export function VendorTallyDocument(props: VendorTallyPdfProps): React.ReactElem
         {/* --- Instructions ---------------------------------------------- */}
         <View style={styles.instructionsBox}>
           <Text>
-            Please write your unit price (in USD) and any notes next to each
-            line item below, then return this sheet by scanning/faxing it
-            back, or by entering prices online at the URL printed in the
-            footer. Leave a line blank if you cannot quote it.
+            Fill in the shaded columns (Unit Price and Notes) for each row.
+            Prices are in USD per unit shown. Return this sheet by
+            scanning/faxing it back, or enter prices online at the URL
+            printed in the footer. Leave a row blank if you cannot quote it.
           </Text>
         </View>
 
@@ -382,8 +378,10 @@ export function VendorTallyDocument(props: VendorTallyPdfProps): React.ReactElem
           </View>
         ) : (
           <>
-            {/* Header row — repeats on each page via fixed */}
-            <View style={styles.tableHeaderRow} fixed>
+            {/* Header row — repeats on each page via fixed. wrap={false}
+                keeps layout predictable if the header ever grows (fonts,
+                extra cells) in the future. */}
+            <View style={styles.tableHeaderRow} fixed wrap={false}>
               <Text style={[styles.tableHeaderCell, styles.colItem]}>#</Text>
               <Text style={[styles.tableHeaderCell, styles.colSpecies]}>Species</Text>
               <Text style={[styles.tableHeaderCell, styles.colDimension]}>Dim</Text>

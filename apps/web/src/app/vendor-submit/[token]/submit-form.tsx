@@ -36,6 +36,7 @@ import { z } from 'zod';
 
 import { Button } from '../../../components/ui/button';
 import { Input } from '../../../components/ui/input';
+import { formatDueByLabel } from '../../../lib/format-datetime';
 
 export interface SubmitFormLineItem {
   id: string;
@@ -241,7 +242,7 @@ export function SubmitForm({
             <span>
               · Reply by{' '}
               <span className="text-text-primary">
-                {new Date(dueBy).toLocaleString('en-US')}
+                {formatDueByLabel(dueBy)}
               </span>
             </span>
           )}
