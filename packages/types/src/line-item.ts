@@ -69,6 +69,7 @@ export const LineItemSchema = z.object({
   notes: z.string().nullable().optional(),
   isConsolidated: z.boolean().default(false),
   originalLineItemId: z.string().uuid().nullable().optional(),
+  sourceLineItemIds: z.array(z.string().uuid()).nullable().optional(),
   sortOrder: z.number().int().nonnegative().default(0),
   extractionMethod: ExtractionMethodSchema.nullable().optional(),
   extractionConfidence: z.number().min(0).max(1).nullable().optional(),
