@@ -36,7 +36,12 @@
       "Bash(git *)",
       "Bash(pnpm --filter @lmbr/lib exec tsc --noEmit)",
       "Bash(pnpm -F @lmbr/types type-check)",
-      "Bash(pnpm -F @lmbr/config type-check)"
+      "Bash(pnpm -F @lmbr/config type-check)",
+      "Bash(ls *)",
+      "Bash(awk -F= '{print \\($2 != \"\" ? \"SET\" : \"EMPTY\"\\)}')",
+      "Bash(npx tsx *)",
+      "Bash(pnpm exec *)",
+      "Bash(pnpm remove *)"
     ]
   }
 }
