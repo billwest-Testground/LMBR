@@ -21,9 +21,11 @@
  *           service-role escape hatch needed on this page because the
  *           tenant gate applies to both tables.
  *
- *           Empty state (no vendor_bids yet) deep-links into the current
- *           workspace step (consolidate) with a TODO pointing Task 8 to
- *           wire the eventual vendor-selector route.
+ *           Empty state (no vendor_bids yet) deep-links into the vendor
+ *           selection workspace at `/bids/[bidId]/vendors/select`. When
+ *           vendor_bids already exist, a "Dispatch more vendors" action
+ *           at the top right of the board links to that same page so
+ *           the Buyer can fan the bid out to additional suppliers.
  *
  * Inputs:   params: { bidId }.
  * Outputs:  React client component.
@@ -39,7 +41,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { Inbox } from 'lucide-react';
+import { Inbox, Send } from 'lucide-react';
 
 import { vendorVisibleIsConsolidatedFlag } from '@lmbr/lib';
 import type { ConsolidationMode, VendorBidStatus } from '@lmbr/types';
@@ -332,12 +334,23 @@ export default function VendorStatusBoardPage({
   return (
     <div className="mx-auto max-w-[1400px] space-y-6 p-8">
       {/* Header */}
-      <div>
-        <h1 className="text-h1 text-text-primary">Vendor status</h1>
-        <p className="mt-1 text-body text-text-secondary">
-          {bid.customerName}
-          {bid.jobName ? ` — ${bid.jobName}` : ''}
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h1 className="text-h1 text-text-primary">Vendor status</h1>
+          <p className="mt-1 text-body text-text-secondary">
+            {bid.customerName}
+            {bid.jobName ? ` — ${bid.jobName}` : ''}
+          </p>
+        </div>
+        {vendorBids.length > 0 && (
+          <Link
+            href={`/bids/${bid.id}/vendors/select`}
+            className="inline-flex items-center gap-2 rounded-sm border border-accent-primary bg-accent-primary/10 px-3 py-1.5 text-body-sm font-medium text-accent-primary transition-colors duration-micro hover:bg-accent-primary/20"
+          >
+            <Send className="h-4 w-4" aria-hidden="true" />
+            Dispatch more vendors
+          </Link>
+        )}
       </div>
 
       {/* Summary counts */}
@@ -463,8 +476,8 @@ function StatusSummaryRow({
 }
 
 /**
- * Empty state — no vendor_bids yet. TODO (Task 8): replace the link with
- * the real vendor-selector workspace route once it exists.
+ * Empty state — no vendor_bids yet. Deep-links into the vendor selection
+ * workspace (Task 8) so the Buyer can pick who should receive the RFQ.
  */
 function EmptyState({ bidId }: { bidId: string }) {
   return (
@@ -472,15 +485,15 @@ function EmptyState({ bidId }: { bidId: string }) {
       <Inbox className="h-8 w-8 text-text-tertiary" aria-hidden="true" />
       <h2 className="text-h3 text-text-primary">No vendors dispatched yet</h2>
       <p className="max-w-md text-body-sm text-text-secondary">
-        Once the buyer selects vendors and dispatches this bid, their status
-        will appear here — one tile per vendor, with live priced counts and a
-        nudge action.
+        Pick the suppliers that should bid on this RFQ — LMBR will rank a
+        shortlist by region and commodity fit, and you can override.
       </p>
       <Link
-        href={`/bids/${bidId}/consolidate`}
+        href={`/bids/${bidId}/vendors/select`}
         className="mt-2 inline-flex items-center gap-2 rounded-sm border border-accent-primary bg-accent-primary/10 px-3 py-1.5 text-body-sm font-medium text-accent-primary transition-colors duration-micro hover:bg-accent-primary/20"
       >
-        Back to bid workspace
+        <Send className="h-4 w-4" aria-hidden="true" />
+        Select vendors
       </Link>
     </div>
   );

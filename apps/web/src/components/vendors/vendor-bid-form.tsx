@@ -12,6 +12,9 @@
  * Built by Worklighter.
  */
 
+// Deferred: fleshed out as part of Prompt 08 (Outlook email composer). The
+// Prompt 05 dispatch flow uses the token-based submit + print pages, so
+// this component has no consumers in the current build.
 export function VendorBidForm() {
   return <div>Not implemented: VendorBidForm</div>;
 }
