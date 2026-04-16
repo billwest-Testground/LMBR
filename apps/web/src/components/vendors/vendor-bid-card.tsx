@@ -130,7 +130,13 @@ export function VendorBidCard({
       ? Math.min(100, Math.round((pricedCount / expectedCount) * 100))
       : 0;
 
-  const [copied, setCopied] = React.useState(false);
+  // Three-state copy indicator — idle / copied / failed. 'failed' covers
+  // Safari + insecure-origin contexts where navigator.clipboard throws;
+  // we surface that visibly instead of silently no-op'ing so the buyer
+  // knows to long-press the title'd link for manual copy.
+  const [copyState, setCopyState] = React.useState<'idle' | 'copied' | 'failed'>(
+    'idle',
+  );
   const copyTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   React.useEffect(() => {
@@ -143,12 +149,16 @@ export function VendorBidCard({
     if (!submitUrl) return;
     try {
       await navigator.clipboard.writeText(submitUrl);
-      setCopied(true);
+      setCopyState('copied');
       if (copyTimer.current) clearTimeout(copyTimer.current);
-      copyTimer.current = setTimeout(() => setCopied(false), 1500);
+      copyTimer.current = setTimeout(() => setCopyState('idle'), 1500);
     } catch {
-      // Clipboard API can fail on insecure origins — fall back silently;
-      // the URL is still visible in the title attribute for manual copy.
+      // Clipboard API can fail on insecure origins / Safari. Flip to the
+      // 'failed' label so the user sees something happened and can fall
+      // back to long-press on the title'd URL for manual copy.
+      setCopyState('failed');
+      if (copyTimer.current) clearTimeout(copyTimer.current);
+      copyTimer.current = setTimeout(() => setCopyState('idle'), 2500);
     }
   }, [submitUrl]);
 
@@ -245,10 +255,15 @@ export function VendorBidCard({
             'hover:border-border-strong hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-border-base disabled:hover:text-text-secondary',
           )}
         >
-          {copied ? (
+          {copyState === 'copied' ? (
             <>
               <Check className="h-3.5 w-3.5" aria-hidden="true" />
               Copied
+            </>
+          ) : copyState === 'failed' ? (
+            <>
+              <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+              Copy failed — long-press link to copy
             </>
           ) : (
             <>
@@ -289,7 +304,11 @@ export function VendorBidCard({
 
       {/* Hidden screen-reader live region for copy confirmation. */}
       <span role="status" aria-live="polite" className="sr-only">
-        {copied ? 'Submit link copied to clipboard' : ''}
+        {copyState === 'copied'
+          ? 'Submit link copied to clipboard'
+          : copyState === 'failed'
+            ? 'Copy failed — long-press the link to copy manually'
+            : ''}
       </span>
     </div>
   );

@@ -65,6 +65,24 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ error: 'User profile not found' }, { status: 403 });
     }
 
+    // Role gate — nudging vendors is a buyer-aligned action. Mirrors the
+    // roles lookup pattern in /api/route-bid (where the same table is used
+    // to build RoutingRoleType[] for the submitting user).
+    const { data: userRoles } = await sessionClient
+      .from('roles')
+      .select('role_type')
+      .eq('user_id', session.user.id)
+      .eq('company_id', profile.company_id);
+
+    const allowedRoles = new Set(['buyer', 'trader_buyer', 'manager', 'owner']);
+    const hasRole = (userRoles ?? []).some((r) => allowedRoles.has(r.role_type));
+    if (!hasRole) {
+      return NextResponse.json(
+        { error: 'Nudging vendors requires a buyer, trader_buyer, manager, or owner role.' },
+        { status: 403 },
+      );
+    }
+
     // RLS-scoped lookup — if the vendor_bid belongs to another tenant, the
     // query returns null and we respond 404 without leaking existence.
     const { data: vendorBid, error: vbError } = await sessionClient

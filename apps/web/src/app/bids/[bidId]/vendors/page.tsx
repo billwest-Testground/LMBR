@@ -37,7 +37,7 @@
 
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Inbox } from 'lucide-react';
 
@@ -127,6 +127,15 @@ export default function VendorStatusBoardPage({
   const [error, setError] = useState<string | null>(null);
   const [nudgingId, setNudgingId] = useState<string | null>(null);
   const [toast, setToast] = useState<NudgeToast | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Cleanup the auto-dismiss timer on unmount so stale callbacks don't fire
+  // (mirrors the `copyTimer` pattern in vendor-bid-card.tsx).
+  useEffect(() => {
+    return () => {
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -294,7 +303,9 @@ export default function VendorStatusBoardPage({
     } finally {
       setNudgingId(null);
       // Auto-dismiss the toast after a few seconds so it doesn't linger.
-      setTimeout(() => setToast(null), 4500);
+      // Clear any prior timer first so rapid-fire nudges don't race.
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+      toastTimer.current = setTimeout(() => setToast(null), 4500);
     }
   }, []);
 
