@@ -27,3 +27,4 @@ export * from './attachment-analyzer';
 export * from './lumber-parser';
 export * from './cost-tracker';
 export * from './queue';
+export * from './vendor-token';
