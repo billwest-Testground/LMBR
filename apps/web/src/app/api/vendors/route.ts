@@ -17,7 +17,7 @@
 
 import { NextResponse, type NextRequest } from 'next/server';
 
-import { getSupabaseAdmin } from '@lmbr/lib';
+import { getSupabaseAdmin, toNumber } from '@lmbr/lib';
 import { VendorSchema, type Vendor } from '@lmbr/types';
 
 import { getSupabaseRouteHandlerClient } from '../../../lib/supabase/server';
@@ -52,7 +52,7 @@ function rowToVendor(row: VendorRow): Vendor {
     vendorType: row.vendor_type,
     commodities: row.commodities ?? [],
     regions: row.regions ?? [],
-    minOrderMbf: Number(row.min_order_mbf ?? 0),
+    minOrderMbf: toNumber(row.min_order_mbf),
     active: row.active,
     notes: row.notes,
     createdAt: row.created_at,

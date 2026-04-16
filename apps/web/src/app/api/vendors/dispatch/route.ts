@@ -2,9 +2,16 @@
  * POST /api/vendors/dispatch — Fan a bid out to a selected vendor list.
  *
  * Purpose:  After routing (Prompt 03) the buyer hits "Dispatch" on a bid.
- *           For each (bid, vendor) pair we upsert a `vendor_bids` row,
- *           mint a stateless HMAC-signed submission token (Task 1), and
- *           hand the buyer UI back the URLs to show / print / email.
+ *           For each (bid, vendor) pair we upsert a `vendor_bids` row in a
+ *           single atomic write — minting a stateless HMAC-signed submission
+ *           token (Task 1) on the pre-chosen row id — and hand the buyer UI
+ *           back the URLs to show / print / email.
+ *
+ *           Atomicity matters: writing the token together with the row in
+ *           one statement means a partial failure can never leave a
+ *           tokenless row behind, and two concurrent dispatches to the same
+ *           (bid, vendor) pair both end up reporting `dispatched` (last
+ *           writer wins on the (bid_id, vendor_id) unique constraint).
  *
  *           Re-dispatch is idempotent: if a (bid_id, vendor_id) row already
  *           exists we re-issue the token, refresh due_by + sent_at, and
@@ -12,9 +19,11 @@
  *           `dispatched`, not `skipped` — the operational intent is the
  *           same as a fresh dispatch.
  *
- *           Vendors that don't belong to the tenant go into `skipped` with
- *           a reason rather than failing the whole request, so a single
- *           racy delete doesn't block the rest of the fan-out.
+ *           Vendors that the tenant cannot use (unknown id, cross-tenant
+ *           id, or inactive) go into `skipped` with a non-leaky reason.
+ *           Unknown and cross-tenant are collapsed into `vendor_not_found`
+ *           at the wire so the endpoint cannot be used to probe foreign
+ *           tenants' vendor UUIDs.
  *
  * Inputs:   { bidId: uuid, vendorIds: uuid[], dueBy: ISO datetime,
  *             submissionMethod?: 'form' | 'scan' | 'email' }
@@ -25,6 +34,8 @@
  * LMBR.ai — Enterprise AI bid automation for wholesale lumber distributors.
  * Built by Worklighter.
  */
+
+import { randomUUID } from 'crypto';
 
 import { NextResponse, type NextRequest } from 'next/server';
 import { z } from 'zod';
@@ -165,17 +176,25 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const skipped: SkippedEntry[] = [];
 
     const ttlMs = dueByDate.getTime() - now.getTime() + TOKEN_GRACE_MS;
-    const tokenExpiresAt = new Date(now.getTime() + ttlMs).toISOString();
+    const expiresAtMs = now.getTime() + ttlMs;
+    const tokenExpiresAt = new Date(expiresAtMs).toISOString();
     const sentAt = now.toISOString();
+    const dueByIso = dueByDate.toISOString();
 
     for (const vendorId of uniqueVendorIds) {
       const vendor = vendorById.get(vendorId);
+      // Collapse "not in the returned set" and "belongs to another tenant"
+      // into a single client-visible reason so the API cannot be used to
+      // probe whether a given UUID exists in another company's vendor list.
       if (!vendor) {
         skipped.push({ vendorId, reason: 'vendor_not_found' });
         continue;
       }
       if (vendor.company_id !== profile.company_id) {
-        skipped.push({ vendorId, reason: 'vendor_different_company' });
+        console.warn(
+          `LMBR.ai dispatch: vendor ${vendorId} belongs to a different company; reporting as vendor_not_found.`,
+        );
+        skipped.push({ vendorId, reason: 'vendor_not_found' });
         continue;
       }
       if (!vendor.active) {
@@ -183,34 +202,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         continue;
       }
 
+      // Reuse the existing row's id when present so the token payload stays
+      // stable across re-dispatch; otherwise mint a fresh UUID up-front so
+      // we can sign the token and write the row in a single atomic upsert.
       const existingId = existingByVendor.get(vendorId);
-
-      let vendorBidId: string;
-      if (existingId) {
-        vendorBidId = existingId;
-      } else {
-        const { data: inserted, error: insertError } = await admin
-          .from('vendor_bids')
-          .insert({
-            bid_id: bidId,
-            vendor_id: vendorId,
-            company_id: profile.company_id,
-            status: 'pending',
-            submission_method: submissionMethod,
-            sent_at: sentAt,
-            due_by: dueByDate.toISOString(),
-          })
-          .select('id')
-          .single();
-        if (insertError || !inserted) {
-          skipped.push({
-            vendorId,
-            reason: `insert_failed: ${insertError?.message ?? 'no row returned'}`,
-          });
-          continue;
-        }
-        vendorBidId = inserted.id;
-      }
+      const vendorBidId = existingId ?? randomUUID();
 
       const token = createVendorBidToken(
         {
@@ -220,23 +216,30 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           companyId: profile.company_id,
         },
         ttlMs,
+        expiresAtMs,
       );
 
-      const { error: updateError } = await admin
+      const { error: upsertError } = await admin
         .from('vendor_bids')
-        .update({
-          token,
-          token_expires_at: tokenExpiresAt,
-          status: 'pending',
-          submission_method: submissionMethod,
-          sent_at: sentAt,
-          due_by: dueByDate.toISOString(),
-        })
-        .eq('id', vendorBidId);
-      if (updateError) {
+        .upsert(
+          {
+            id: vendorBidId,
+            bid_id: bidId,
+            vendor_id: vendorId,
+            company_id: profile.company_id,
+            status: 'pending',
+            submission_method: submissionMethod,
+            token,
+            token_expires_at: tokenExpiresAt,
+            sent_at: sentAt,
+            due_by: dueByIso,
+          },
+          { onConflict: 'bid_id,vendor_id' },
+        );
+      if (upsertError) {
         skipped.push({
           vendorId,
-          reason: `token_update_failed: ${updateError.message}`,
+          reason: `upsert_failed: ${upsertError.message}`,
         });
         continue;
       }

@@ -113,12 +113,19 @@ function signPayload(payloadB64: string, secret: string): Buffer {
  * relative to now; the expiry is embedded in the payload so verification
  * doesn't need a clock source outside the token itself.
  *
+ * Callers that need the token's expiry to exactly match a value they
+ * already wrote to the database (to avoid sub-millisecond drift between
+ * `Date.now()` at this call site and `Date.now()` in the caller) may
+ * pass `expiresAtMs` explicitly — when provided, it is used as-is and
+ * `ttlMs` is still validated for consistency but not re-applied.
+ *
  * Throws if `VENDOR_TOKEN_SECRET` is missing or if any identifier is empty
  * — those are programmer errors, not validation failures.
  */
 export function createVendorBidToken(
   payload: Omit<VendorBidTokenPayload, 'expiresAt'>,
   ttlMs: number,
+  expiresAtMs?: number,
 ): string {
   if (!payload.vendorBidId || !payload.bidId || !payload.vendorId || !payload.companyId) {
     throw new Error(
@@ -129,13 +136,25 @@ export function createVendorBidToken(
     throw new Error('LMBR.ai: createVendorBidToken requires a positive finite ttlMs.');
   }
 
+  let expiresAt: number;
+  if (expiresAtMs !== undefined) {
+    if (!Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now()) {
+      throw new Error(
+        'LMBR.ai: createVendorBidToken requires expiresAtMs to be a finite epoch-ms value in the future.',
+      );
+    }
+    expiresAt = expiresAtMs;
+  } else {
+    expiresAt = Date.now() + ttlMs;
+  }
+
   const secret = getSecret();
   const full: VendorBidTokenPayload = {
     vendorBidId: payload.vendorBidId,
     bidId: payload.bidId,
     vendorId: payload.vendorId,
     companyId: payload.companyId,
-    expiresAt: Date.now() + ttlMs,
+    expiresAt,
   };
 
   const payloadB64 = b64urlEncode(JSON.stringify(full));

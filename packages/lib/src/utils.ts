@@ -71,3 +71,17 @@ export function consolidationKey(parts: {
     seg(normalizeUnit(parts.unit ?? '')),
   ].join('|');
 }
+
+/**
+ * Convert a Postgres `numeric` column value to a JS number.
+ * Supabase returns `numeric(p,s)` as string at runtime even when the
+ * TypeScript type suggests otherwise — this helper centralizes the
+ * coercion so every column mapper doesn't repeat the same `Number(...)
+ * ?? 0` pattern. Null/undefined map to 0.
+ */
+export function toNumber(value: string | number | null | undefined): number {
+  if (value === null || value === undefined) return 0;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
