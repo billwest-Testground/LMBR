@@ -160,6 +160,11 @@ export async function applyMargin(
   }
 
   // --- Load line items + company settings in parallel -----------------------
+  // Use the same working-set rule as loadComparison: originals for
+  // 'structured', consolidated rows for every other mode. The buyer's
+  // selections (body.selections) target the working set — if we load both
+  // kinds here, the originals would all land in unresolvedLineItemIds.
+  const useConsolidated = bid.consolidation_mode !== 'structured';
   const [linesResult, companyResult] = await Promise.all([
     supabase
       .from('line_items')
@@ -167,6 +172,7 @@ export async function applyMargin(
         'id, species, dimension, grade, length, quantity, unit, building_tag, phase_number, sort_order',
       )
       .eq('bid_id', bidId)
+      .eq('is_consolidated', useConsolidated)
       .order('sort_order', { ascending: true })
       .order('id', { ascending: true }),
     supabase
@@ -355,22 +361,15 @@ export async function applyMargin(
   // surface via db_error consistently — mixing the two (one warns, the
   // other silently awaits) hides real failures in production. Pick
   // warn-continue and apply it to both.
+  // `pending_approval` is a quote_status, NOT a bid_status. When the quote
+  // goes pending_approval the bid stays in 'pricing' — the approval
+  // concept belongs to the quote, the bid is still in its pricing phase.
+  // Bid only advances past 'pricing' when the quote is released ('sent'
+  // in Prompt 08) or explicitly approved by a manager action.
   if (bid.status === 'quoting' || bid.status === 'comparing') {
-    const nextBidStatus =
-      targetStatus === 'pending_approval' ? 'pending_approval' : 'pricing';
     const { error: bidUpdateError } = await admin
       .from('bids')
-      .update({ status: nextBidStatus })
-      .eq('id', bidId);
-    if (bidUpdateError) {
-      console.warn(
-        `LMBR.ai applyMargin: bid status advance failed for ${bidId}: ${bidUpdateError.message}`,
-      );
-    }
-  } else if (bid.status === 'pricing' && targetStatus === 'pending_approval') {
-    const { error: bidUpdateError } = await admin
-      .from('bids')
-      .update({ status: 'pending_approval' })
+      .update({ status: 'pricing' })
       .eq('id', bidId);
     if (bidUpdateError) {
       console.warn(
@@ -378,6 +377,8 @@ export async function applyMargin(
       );
     }
   }
+  // bid.status === 'pricing' already — no-op. Quote-level approval state
+  // is tracked on `quotes.status` (draft | pending_approval | approved).
 
   return {
     status: 'ok',

@@ -90,7 +90,7 @@ export async function loadComparison(
   // --- Verify bid + company ownership ---------------------------------------
   const { data: bid, error: bidError } = await supabase
     .from('bids')
-    .select('id, company_id, customer_name, job_name, due_date')
+    .select('id, company_id, customer_name, job_name, due_date, consolidation_mode')
     .eq('id', bidId)
     .maybeSingle();
   if (bidError) {
@@ -104,12 +104,18 @@ export async function loadComparison(
   }
 
   // --- Load line_items for the bid ------------------------------------------
+  // Vendors priced the *working set* — the originals in 'structured' mode,
+  // the consolidated rows in 'consolidated' / 'phased' / 'hybrid'. Without
+  // this filter the matrix would render phantom empty rows for every
+  // original alongside the real priced consolidated rows.
+  const useConsolidated = bid.consolidation_mode !== 'structured';
   const { data: lineItemRows, error: lineItemError } = await supabase
     .from('line_items')
     .select(
       'id, species, dimension, grade, length, quantity, unit, building_tag, phase_number, sort_order',
     )
     .eq('bid_id', bidId)
+    .eq('is_consolidated', useConsolidated)
     .order('sort_order', { ascending: true })
     .order('building_tag', { ascending: true })
     .order('id', { ascending: true });
