@@ -59,20 +59,55 @@ export const REGION_BY_STATE: Readonly<Record<string, RegionId>> = Object.freeze
 );
 
 /**
- * Resolve a 2-letter state code to a region id.
- * Implementation stub — routing rules not yet finalized.
+ * Full state name → 2-letter abbreviation. Used by routeBidToRegion to
+ * accept both "California" and "CA" as input.
  */
-export function routeBidToRegion(_stateCode: string): RegionId {
-  throw new Error('Not implemented');
+const STATE_NAME_TO_ABBR: Readonly<Record<string, string>> = Object.freeze({
+  'alabama': 'AL', 'alaska': 'AK', 'arizona': 'AZ', 'arkansas': 'AR',
+  'california': 'CA', 'colorado': 'CO', 'connecticut': 'CT', 'delaware': 'DE',
+  'district of columbia': 'DC', 'florida': 'FL', 'georgia': 'GA', 'hawaii': 'HI',
+  'idaho': 'ID', 'illinois': 'IL', 'indiana': 'IN', 'iowa': 'IA',
+  'kansas': 'KS', 'kentucky': 'KY', 'louisiana': 'LA', 'maine': 'ME',
+  'maryland': 'MD', 'massachusetts': 'MA', 'michigan': 'MI', 'minnesota': 'MN',
+  'mississippi': 'MS', 'missouri': 'MO', 'montana': 'MT', 'nebraska': 'NE',
+  'nevada': 'NV', 'new hampshire': 'NH', 'new jersey': 'NJ', 'new mexico': 'NM',
+  'new york': 'NY', 'north carolina': 'NC', 'north dakota': 'ND', 'ohio': 'OH',
+  'oklahoma': 'OK', 'oregon': 'OR', 'pennsylvania': 'PA', 'rhode island': 'RI',
+  'south carolina': 'SC', 'south dakota': 'SD', 'tennessee': 'TN', 'texas': 'TX',
+  'utah': 'UT', 'vermont': 'VT', 'virginia': 'VA', 'washington': 'WA',
+  'west virginia': 'WV', 'wisconsin': 'WI', 'wyoming': 'WY',
+});
+
+/**
+ * Resolve a state identifier to a region id. Accepts 2-letter abbreviations
+ * (CA, ca) and full state names (California). Returns null for unknown input
+ * rather than throwing — the routing agent treats null region as "no region
+ * constraint" and falls back to species-only matching.
+ */
+export function routeBidToRegion(stateCode: string | null | undefined): string | null {
+  if (!stateCode) return null;
+  const trimmed = stateCode.trim();
+  if (!trimmed) return null;
+
+  // Try as 2-letter abbreviation first (most common path).
+  const upper = trimmed.toUpperCase();
+  if (upper in REGION_BY_STATE) return REGION_BY_STATE[upper] ?? null;
+
+  // Try as full state name.
+  const lower = trimmed.toLowerCase();
+  const abbr = STATE_NAME_TO_ABBR[lower];
+  if (abbr && abbr in REGION_BY_STATE) return REGION_BY_STATE[abbr] ?? null;
+
+  return null;
 }
 
 /**
  * Given a region and commodity, return ordered preferred vendor ids.
- * Implementation stub — policy engine pending.
+ * // TODO: Prompt 05 — vendor dispatch will populate this
  */
 export function preferredVendorsForRegion(
   _region: RegionId,
   _commodityId: string,
 ): readonly string[] {
-  throw new Error('Not implemented');
+  return [];
 }

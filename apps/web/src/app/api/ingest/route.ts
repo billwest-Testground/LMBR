@@ -45,6 +45,7 @@ import {
   getSupabaseAdmin,
   type IngestJob,
 } from '@lmbr/lib';
+import { routeBidToRegion } from '@lmbr/config';
 
 import { getSupabaseRouteHandlerClient } from '../../../lib/supabase/server';
 import { BIDS_BUCKET, processIngestJob } from './processor';
@@ -61,12 +62,16 @@ const JsonBodySchema = z.object({
   customerName: z.string().trim().min(1).max(240).optional(),
   jobName: z.string().trim().max(240).optional(),
   customerEmail: z.string().email().optional(),
+  jobAddress: z.string().trim().max(500).optional(),
+  jobState: z.string().trim().max(40).optional(),
 });
 
 const FormMetaSchema = z.object({
   customerName: z.string().trim().min(1).max(240).optional(),
   jobName: z.string().trim().max(240).optional(),
   customerEmail: z.string().email().optional(),
+  jobAddress: z.string().trim().max(500).optional(),
+  jobState: z.string().trim().max(40).optional(),
 });
 
 // -----------------------------------------------------------------------------
@@ -109,6 +114,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     let customerName: string | undefined;
     let jobName: string | undefined;
     let customerEmail: string | undefined;
+    let jobAddress: string | undefined;
+    let jobState: string | undefined;
 
     if (contentType.startsWith('multipart/form-data')) {
       const form = await req.formData();
@@ -126,6 +133,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         customerName: stringFrom(form.get('customerName')),
         jobName: stringFrom(form.get('jobName')),
         customerEmail: stringFrom(form.get('customerEmail')),
+        jobAddress: stringFrom(form.get('jobAddress')),
+        jobState: stringFrom(form.get('jobState')),
       });
       if (!meta.success) {
         return NextResponse.json(
@@ -136,6 +145,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       customerName = meta.data.customerName;
       jobName = meta.data.jobName;
       customerEmail = meta.data.customerEmail;
+      jobAddress = meta.data.jobAddress;
+      jobState = meta.data.jobState;
     } else if (contentType.startsWith('application/json')) {
       const body = JsonBodySchema.safeParse(await req.json());
       if (!body.success) {
@@ -148,6 +159,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       customerName = body.data.customerName;
       jobName = body.data.jobName;
       customerEmail = body.data.customerEmail;
+      jobAddress = body.data.jobAddress;
+      jobState = body.data.jobState;
     } else {
       return NextResponse.json(
         { error: 'Unsupported Content-Type' },
@@ -184,6 +197,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const bidInsertName =
       customerName ?? deriveCustomerName(rawText, fileName) ?? 'New customer';
 
+    // Auto-derive job_region from job_state when present.
+    const jobRegion = jobState ? routeBidToRegion(jobState) : null;
+
     const { data: bid, error: bidError } = await admin
       .from('bids')
       .insert({
@@ -193,6 +209,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         customer_name: bidInsertName,
         customer_email: customerEmail ?? null,
         job_name: jobName ?? null,
+        job_address: jobAddress ?? null,
+        job_state: jobState ?? null,
+        job_region: jobRegion,
         status: 'extracting',
         consolidation_mode: 'structured',
         raw_file_url: uploadResult.signedUrl,
