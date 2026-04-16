@@ -104,6 +104,15 @@ const LENGTH_PATTERNS: RegExp[] = [
   /\b(\d+(?:\.\d+)?)\s*(?:ft|foot|feet)\b/i, // 8 ft / 8 feet
 ];
 
+/**
+ * Matches the length component from the common "dimension-length" shorthand
+ * used industry-wide, e.g. 2x4-8, 2x6-16, 4x4-12, 2x10-20.
+ * The pattern requires a dimension prefix (NxN) immediately followed by a
+ * hyphen and digits. Returns the length portion only.
+ */
+const DIMENSION_HYPHEN_LENGTH_PATTERN =
+  /(\d+(?:\.\d+)?)\s*[×xX]\s*(\d+(?:\.\d+)?)\s*[-–]\s*(\d+(?:\.\d+)?)/;
+
 const RANDOM_LENGTH_PATTERN = /\b(r\s*\/?\s*l|rand(?:om)?\s*l[a-z]*)\b/i;
 
 const LENGTH_RANGE_PATTERN = /\b(\d+)\s*-\s*(\d+)\s*['′]?/;
@@ -201,7 +210,7 @@ function finalizeResult(
   }
 
   const overallConfidence =
-    totalLineItems === 0 ? 0 : clamp01(confidenceSum / totalLineItems);
+    totalLineItems === 0 ? 0 : round4(clamp01(confidenceSum / totalLineItems));
 
   return {
     buildingGroups,
@@ -405,6 +414,15 @@ function buildLineItemFromExcelRow(
     if (!length) length = scanLength(source) ?? '';
   }
 
+  // Panel fallback: try fractional thickness (7/16, 15/32) from the
+  // dimension column or freeform sources when NxN didn't match.
+  const speciesForCheck = normalizeSpecies(species);
+  if (!scanDimension(dimension) && PANEL_OR_ENGINEERED.has(speciesForCheck)) {
+    const frac = scanPanelDimension(dimension) ??
+      freeformSources.reduce<string | null>((found, s) => found ?? scanPanelDimension(s), null);
+    if (frac) dimension = frac;
+  }
+
   // Quantity — first number we can parse, from the qty column or (as a
   // fallback) the description field.
   let quantity = parseQuantity(qtyRaw);
@@ -418,8 +436,10 @@ function buildLineItemFromExcelRow(
   if (!hasAnySignal) return null;
 
   // Build the line item using the same normalizers everything else uses.
-  const normalizedSpecies = normalizeSpecies(species);
-  const normalizedDim = normalizeDimension(dimension);
+  const normalizedSpecies = speciesForCheck;
+  const normalizedDim = PANEL_OR_ENGINEERED.has(normalizedSpecies) && dimension
+    ? dimension  // Keep fractional notation as-is for panels
+    : normalizeDimension(dimension);
   const normalizedGrade = normalizeGrade(grade);
   const normalizedLen = normalizeLength(length);
   const normalizedUnit = resolveUnit(unitRaw, normalizedSpecies);
@@ -512,20 +532,41 @@ export function parseTextList(text: string): ExtractedBuildingGroup[] {
 
 function buildLineItemFromText(line: string): ExtractedLineItem | null {
   const species = scanSpecies(line);
-  const dimension = scanDimension(line);
+  let dimension = scanDimension(line);
   const grade = scanGrade(line);
   const length = scanLength(line);
   const unitRaw = scanUnit(line);
-  const quantity = parseQuantity(line);
+
+  // Panel fallback: if the species is a panel/engineered product and no NxN
+  // dimension was found, try to extract a fractional thickness (7/16, 15/32).
+  const speciesNorm = normalizeSpecies(species ?? '');
+  if (!dimension && PANEL_OR_ENGINEERED.has(speciesNorm)) {
+    dimension = scanPanelDimension(line);
+  }
+
+  // Build a quantity-scanning string that strips the dimension match so
+  // parseQuantity doesn't grab digits from the dimension (e.g. "7" from
+  // "7/16", or "1" from "1.75x9.5").
+  let qtyText = line;
+  if (dimension) {
+    // Always try stripping the NxN pattern first (covers LVL 1.75x9.5 etc.).
+    // Then strip fractional for panels (7/16, 15/32).
+    qtyText = qtyText.replace(DIMENSION_PATTERN, ' ');
+    qtyText = qtyText.replace(FRACTIONAL_DIMENSION_PATTERN, ' ');
+  }
+  const quantity = parseQuantity(qtyText);
 
   // Require at least two strong signals to emit a row — otherwise this is
-  // probably a heading or a note.
+  // probably a heading or a note. For panel species, a fractional dimension
+  // counts as a strong signal just like NxN does.
   const strongSignalCount =
     (species ? 1 : 0) + (dimension ? 1 : 0) + (quantity != null ? 1 : 0);
   if (strongSignalCount < 2) return null;
 
-  const normalizedSpecies = normalizeSpecies(species ?? '');
-  const normalizedDim = normalizeDimension(dimension ?? '');
+  const normalizedSpecies = speciesNorm;
+  const normalizedDim = dimension && PANEL_OR_ENGINEERED.has(normalizedSpecies)
+    ? dimension  // Keep fractional notation as-is for panels
+    : normalizeDimension(dimension ?? '');
   const normalizedGrade = normalizeGrade(grade ?? '');
   const normalizedLen = normalizeLength(length ?? '');
   const normalizedUnit = resolveUnit(unitRaw ?? '', normalizedSpecies);
@@ -581,6 +622,19 @@ function scanDimension(text: string): string | null {
   return `${m[1]}x${m[2]}`;
 }
 
+/**
+ * Panel products (OSB, Plywood) use fractional thickness notation (7/16,
+ * 15/32, 3/4) rather than an NxN dimension. This scanner extracts the
+ * fractional value as the dimension when the species is a panel type.
+ */
+const FRACTIONAL_DIMENSION_PATTERN = /\b(\d+\/\d+)\b/;
+
+function scanPanelDimension(text: string): string | null {
+  if (!text) return null;
+  const m = text.match(FRACTIONAL_DIMENSION_PATTERN);
+  return m ? m[1] ?? null : null;
+}
+
 function scanGrade(text: string): string | null {
   if (!text) return null;
   for (const [pattern, canonical] of GRADE_SCAN) {
@@ -596,6 +650,10 @@ function scanLength(text: string): string | null {
     const m = text.match(pattern);
     if (m && m[1]) return m[1];
   }
+  // Check for dimension-hyphen-length shorthand (2x4-8, 2x6-16, etc.)
+  // before the generic range pattern so "2x4-8" isn't misread as range "4-8".
+  const dimLen = text.match(DIMENSION_HYPHEN_LENGTH_PATTERN);
+  if (dimLen && dimLen[3]) return dimLen[3];
   const range = text.match(LENGTH_RANGE_PATTERN);
   if (range && range[1] && range[2]) return `${range[1]}-${range[2]}`;
   return null;
@@ -650,8 +708,18 @@ function scoreLine(inputs: ScoreInputs): ScoreOutput {
   if (inputs.species) score += 0.25;
   else flags.push('missing_species');
 
-  if (inputs.dimension && parseDimension(inputs.dimension)) score += 0.25;
-  else flags.push('missing_dimension');
+  const isPanelOrEngineered = PANEL_OR_ENGINEERED.has(inputs.species);
+  if (inputs.dimension && (parseDimension(inputs.dimension) || isPanelOrEngineered)) {
+    // Panels use fractional thickness (7/16, 15/32) which parseDimension
+    // won't recognise as NxN — credit the dimension slot when the fraction
+    // string is present and the species is a panel type.
+    score += 0.25;
+  } else if (isPanelOrEngineered) {
+    // Panel with no dimension at all — still waive the penalty.
+    score += 0.25;
+  } else {
+    flags.push('missing_dimension');
+  }
 
   if (inputs.quantity > 0) score += 0.2;
   else flags.push('unclear_quantity');
@@ -661,7 +729,6 @@ function scoreLine(inputs: ScoreInputs): ScoreOutput {
   else flags.push('missing_length');
 
   // Grade — waive for panels / engineered products.
-  const isPanelOrEngineered = PANEL_OR_ENGINEERED.has(inputs.species);
   if (inputs.grade) {
     score += 0.1;
   } else if (isPanelOrEngineered) {
@@ -832,4 +899,8 @@ function clamp01(n: number): number {
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
+}
+
+function round4(n: number): number {
+  return Math.round(n * 10000) / 10000;
 }
