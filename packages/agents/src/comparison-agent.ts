@@ -18,6 +18,20 @@
  *           the raw snapshot under RLS and hands it to this function; the
  *           UI then renders the result directly.
  *
+ * Vendor status semantics — READ THIS BEFORE EDITING:
+ *   - LIVE statuses (prices participate in best/worst/spread ranking):
+ *       * 'submitted' — vendor has fully responded with pricing.
+ *       * 'partial'   — vendor has responded with some lines priced.
+ *   - NOT-LIVE statuses (prices excluded from ranking, cells null-priced):
+ *       * 'declined'  — vendor declined to quote. Cell renders `declined: true`.
+ *       * 'expired'   — vendor's window passed. Cell renders `declined: false`,
+ *                        `unitPrice: null`, `totalPrice: null`.
+ *       * 'pending'   — vendor hasn't responded yet. Same as 'expired' for
+ *                        matrix rendering (no price, `declined: false`).
+ *   A vendor's stale row data (e.g. an old unit_price on an expired
+ *   vendor_bid_line_item) is intentionally ignored — only vendors in a
+ *   live status contribute to ranking or appear priced in the matrix.
+ *
  * Determinism contract — READ THIS BEFORE EDITING:
  *   1. Same ComparisonInput MUST always produce the same ComparisonResult.
  *   2. Lines are ordered by (sortOrder ASC, buildingTag ASC, lineItemId ASC).
@@ -37,15 +51,19 @@
  *      response-time data becomes part of ComparisonInput.
  *
  * Inputs:   ComparisonInput — flat, denormalized snapshot (see types below).
+ *           Validated at the function boundary via ComparisonInputSchema
+ *           (Zod). Malformed input throws, per CLAUDE.md agent conventions.
  * Outputs:  ComparisonResult — matrix rows, vendor summaries, suggestions.
  * Agent/API: none — pure TypeScript.
- * Imports:  @lmbr/types.
+ * Imports:  zod, @lmbr/types.
  *
  * LMBR.ai — Enterprise AI bid automation for wholesale lumber distributors.
  * Built by Worklighter.
  */
 
-import type { VendorBidStatus } from '@lmbr/types';
+import { z } from 'zod';
+
+import { VendorBidStatusSchema, type VendorBidStatus } from '@lmbr/types';
 
 // -----------------------------------------------------------------------------
 // Input / output types
@@ -149,6 +167,66 @@ export interface ComparisonResult {
 }
 
 // -----------------------------------------------------------------------------
+// Zod input schema (CLAUDE.md: all agent inputs are Zod-validated)
+// -----------------------------------------------------------------------------
+
+/**
+ * Validates the shape of ComparisonInput at the function boundary.
+ * We intentionally do NOT validate ComparisonResult — it's our output, we
+ * own its shape, and validating it would add runtime cost with no caller-
+ * protection benefit.
+ */
+export const ComparisonInputSchema = z.object({
+  bidId: z.string().min(1),
+  vendors: z.array(
+    z.object({
+      vendorId: z.string().min(1),
+      vendorName: z.string(),
+      vendorBidId: z.string().min(1),
+      status: VendorBidStatusSchema,
+    }),
+  ),
+  lines: z.array(
+    z.object({
+      lineItemId: z.string().min(1),
+      species: z.string(),
+      dimension: z.string(),
+      grade: z.string().nullable(),
+      length: z.string().nullable(),
+      quantity: z.number(),
+      unit: z.enum(['PCS', 'MBF', 'MSF']),
+      buildingTag: z.string().nullable(),
+      phaseNumber: z.number().nullable(),
+      sortOrder: z.number(),
+    }),
+  ),
+  vendorLines: z.array(
+    z.object({
+      vendorBidLineItemId: z.string().min(1),
+      vendorBidId: z.string().min(1),
+      vendorId: z.string().min(1),
+      lineItemId: z.string().min(1),
+      unitPrice: z.number().nullable(),
+      totalPrice: z.number().nullable(),
+    }),
+  ),
+});
+
+// -----------------------------------------------------------------------------
+// Status semantics
+// -----------------------------------------------------------------------------
+
+/**
+ * Returns true for statuses whose prices should participate in the
+ * best/worst/spread ranking. See the status-semantics block in the file
+ * header for the full rationale. Single source of truth for "live" here —
+ * if you change this, also update the file header docs and tests.
+ */
+function isLive(status: VendorBidStatus): boolean {
+  return status === 'submitted' || status === 'partial';
+}
+
+// -----------------------------------------------------------------------------
 // Rounding helpers
 // -----------------------------------------------------------------------------
 
@@ -162,6 +240,9 @@ function round4(value: number): number {
 // -----------------------------------------------------------------------------
 
 export function comparisonAgent(input: ComparisonInput): ComparisonResult {
+  // Fail-loud on malformed input (CLAUDE.md: all agent inputs are Zod-validated).
+  ComparisonInputSchema.parse(input);
+
   const { bidId, vendors, lines, vendorLines } = input;
 
   // --- Empty-input fast path (still returns a valid-shaped result) ---------
@@ -182,9 +263,12 @@ export function comparisonAgent(input: ComparisonInput): ComparisonResult {
   const vendorById = new Map<string, ComparisonVendor>();
   for (const v of vendors) vendorById.set(v.vendorId, v);
 
-  const declinedVendorIds = new Set<string>();
+  // Ineligible = any vendor whose status is NOT live. These are excluded
+  // from best/worst/spread and render as null-priced cells. The `declined`
+  // cell flag is set ONLY for status === 'declined' (see below).
+  const ineligibleVendorIds = new Set<string>();
   for (const v of vendors) {
-    if (v.status === 'declined') declinedVendorIds.add(v.vendorId);
+    if (!isLive(v.status)) ineligibleVendorIds.add(v.vendorId);
   }
 
   // Index vendor lines by (lineItemId, vendorId). If the snapshot somehow
@@ -218,7 +302,7 @@ export function comparisonAgent(input: ComparisonInput): ComparisonResult {
     const perLine = vlByLineAndVendor.get(line.lineItemId);
     if (!perLine) continue;
     for (const vendor of vendors) {
-      if (declinedVendorIds.has(vendor.vendorId)) continue;
+      if (ineligibleVendorIds.has(vendor.vendorId)) continue;
       const vl = perLine.get(vendor.vendorId);
       if (vl && vl.unitPrice !== null && vl.unitPrice !== undefined) {
         linesPricedCount.set(vendor.vendorId, (linesPricedCount.get(vendor.vendorId) ?? 0) + 1);
@@ -232,14 +316,14 @@ export function comparisonAgent(input: ComparisonInput): ComparisonResult {
     const perLine = vlByLineAndVendor.get(line.lineItemId);
     const cells: ComparisonCell[] = [];
 
-    // First pass on this line — collect unit prices for non-declined vendors.
+    // First pass on this line — collect unit prices for live vendors only.
     const pricedForLine: Array<{ vendorId: string; unitPrice: number }> = [];
 
     for (const vendor of vendors) {
-      const declined = declinedVendorIds.has(vendor.vendorId);
+      const ineligible = ineligibleVendorIds.has(vendor.vendorId);
       const vl = perLine?.get(vendor.vendorId);
       const hasPrice =
-        !declined && !!vl && vl.unitPrice !== null && vl.unitPrice !== undefined;
+        !ineligible && !!vl && vl.unitPrice !== null && vl.unitPrice !== undefined;
 
       if (hasPrice && vl) {
         pricedForLine.push({ vendorId: vendor.vendorId, unitPrice: vl.unitPrice as number });
@@ -267,14 +351,17 @@ export function comparisonAgent(input: ComparisonInput): ComparisonResult {
     }
 
     for (const vendor of vendors) {
-      const declined = declinedVendorIds.has(vendor.vendorId);
+      const ineligible = ineligibleVendorIds.has(vendor.vendorId);
+      // `declined` cell flag: ONLY for explicit 'declined' status. Expired
+      // and pending vendors are null-priced but not flagged as declined.
+      const isDeclined = vendor.status === 'declined';
       const vl = perLine?.get(vendor.vendorId);
       const unitPrice =
-        !declined && vl && vl.unitPrice !== null && vl.unitPrice !== undefined
+        !ineligible && vl && vl.unitPrice !== null && vl.unitPrice !== undefined
           ? vl.unitPrice
           : null;
       const totalPrice =
-        !declined && vl && vl.totalPrice !== null && vl.totalPrice !== undefined
+        !ineligible && vl && vl.totalPrice !== null && vl.totalPrice !== undefined
           ? vl.totalPrice
           : null;
 
@@ -299,7 +386,7 @@ export function comparisonAgent(input: ComparisonInput): ComparisonResult {
           worstUnitPrice !== null &&
           unitPrice === worstUnitPrice &&
           pricedForLine.length >= 2,
-        declined,
+        declined: isDeclined,
         percentAboveBest,
       });
     }
@@ -338,14 +425,15 @@ export function comparisonAgent(input: ComparisonInput): ComparisonResult {
   // --- Vendor summaries ----------------------------------------------------
   const totalLines = sortedLines.length;
   const vendorSummaries: VendorSummary[] = vendors.map((vendor) => {
-    const declined = declinedVendorIds.has(vendor.vendorId);
+    const ineligible = ineligibleVendorIds.has(vendor.vendorId);
+    const isDeclined = vendor.status === 'declined';
     let linesPriced = 0;
     let linesNoBid = 0;
     let totalIfAllSelected = 0;
 
     for (const line of sortedLines) {
       const vl = vlByLineAndVendor.get(line.lineItemId)?.get(vendor.vendorId);
-      if (declined) continue; // counted separately below
+      if (ineligible) continue; // counted via linesDeclined / linesNoBid below
       const hasPrice = !!vl && vl.unitPrice !== null && vl.unitPrice !== undefined;
       if (hasPrice) {
         linesPriced += 1;
@@ -357,7 +445,11 @@ export function comparisonAgent(input: ComparisonInput): ComparisonResult {
       }
     }
 
-    const linesDeclined = declined ? totalLines : 0;
+    // Only explicit 'declined' status rolls up into linesDeclined. Expired
+    // and pending vendors contribute their line count to linesNoBid so the
+    // coverage view reflects "no live price".
+    const linesDeclined = isDeclined ? totalLines : 0;
+    const ineligibleNoBid = ineligible && !isDeclined ? totalLines : 0;
     const responseCoveragePercent =
       totalLines === 0 ? 0 : round4(linesPriced / totalLines);
 
@@ -366,7 +458,7 @@ export function comparisonAgent(input: ComparisonInput): ComparisonResult {
       vendorName: vendor.vendorName,
       linesPriced,
       linesDeclined,
-      linesNoBid: declined ? 0 : linesNoBid,
+      linesNoBid: ineligible ? ineligibleNoBid : linesNoBid,
       responseCoveragePercent,
       totalIfAllSelected: round4(totalIfAllSelected),
     };
@@ -378,7 +470,7 @@ export function comparisonAgent(input: ComparisonInput): ComparisonResult {
     sortedLines,
     vendors,
     vlByLineAndVendor,
-    declinedVendorIds,
+    ineligibleVendorIds,
     linesPricedCount,
   );
 
@@ -471,18 +563,28 @@ function buildCheapestSuggestion(
   };
 }
 
+type FewestVendorsCandidate = {
+  vendorId: string;
+  coveredLineIds: string[];
+  coveredTotal: number;
+};
+
 function buildFewestVendorsSuggestion(
   sortedLines: ComparisonLineInput[],
   vendors: ComparisonVendor[],
   vlByLineAndVendor: Map<string, Map<string, ComparisonVendorLine>>,
-  declinedVendorIds: Set<string>,
+  ineligibleVendorIds: Set<string>,
   linesPricedCount: Map<string, number>,
 ): SuggestedSelection {
+  // Hoisted out of the while-loop below — the map doesn't change between
+  // iterations, so rebuilding it each pass was pure overhead.
+  const vendorById = new Map(vendors.map((v) => [v.vendorId, v] as const));
+
   // For each vendor, precompute { lineItemId -> (unitPrice, totalPrice) } for
-  // only the lines they actually bid on (non-null unitPrice, not declined).
+  // only the lines they actually bid on (non-null unitPrice, live status).
   const coverage = new Map<string, Map<string, { unitPrice: number; totalPrice: number }>>();
   for (const vendor of vendors) {
-    if (declinedVendorIds.has(vendor.vendorId)) continue;
+    if (ineligibleVendorIds.has(vendor.vendorId)) continue;
     const m = new Map<string, { unitPrice: number; totalPrice: number }>();
     for (const line of sortedLines) {
       const vl = vlByLineAndVendor.get(line.lineItemId)?.get(vendor.vendorId);
@@ -506,12 +608,7 @@ function buildFewestVendorsSuggestion(
     // For every candidate vendor with any coverage of still-unassigned lines,
     // count how many remaining lines they'd cover and the total cost for
     // that subset.
-    type Candidate = {
-      vendorId: string;
-      coveredLineIds: string[];
-      coveredTotal: number;
-    };
-    const candidates: Candidate[] = [];
+    const candidates: FewestVendorsCandidate[] = [];
 
     for (const [vendorId, lineMap] of coverage.entries()) {
       const coveredLineIds: string[] = [];
@@ -532,7 +629,6 @@ function buildFewestVendorsSuggestion(
 
     // Sort: most coverage wins; tie → lowest subset total cost; tie →
     // most lines priced across the whole bid; tie → alphabetical name.
-    const vendorById = new Map(vendors.map((v) => [v.vendorId, v] as const));
     candidates.sort((a, b) => {
       if (a.coveredLineIds.length !== b.coveredLineIds.length) {
         return b.coveredLineIds.length - a.coveredLineIds.length;

@@ -215,6 +215,94 @@ describe('comparisonAgent — declined vendor', () => {
   });
 });
 
+describe('comparisonAgent — expired vendor (not-live)', () => {
+  // Expired vendors must be excluded from ranking (their window has closed
+  // and any stored unit_price is stale), but they must NOT be flagged as
+  // declined — they simply render as no-price cells.
+  const vendors = [
+    mkVendor('va', 'Alpha'),
+    mkVendor('vb', 'Beta', 'expired'),
+    mkVendor('vc', 'Charlie'),
+  ];
+  const lines = [mkLine('line-1', 0)];
+  const vendorLines = [
+    mkVL('vl-1', 'va', 'line-1', 100, 10_000),
+    // Beta has stale row data from before expiry — must be ignored.
+    mkVL('vl-2', 'vb', 'line-1', 50, 5_000),
+    mkVL('vl-3', 'vc', 'line-1', 110, 11_000),
+  ];
+  const out = comparisonAgent({ bidId: 'b', vendors, lines, vendorLines });
+
+  it('expired vendor cell is null-priced with declined=false', () => {
+    const row = out.rows[0]!;
+    const cellVb = row.cells.find((c) => c.vendorId === 'vb')!;
+    expect(cellVb.unitPrice).toBeNull();
+    expect(cellVb.totalPrice).toBeNull();
+    expect(cellVb.declined).toBe(false);
+    expect(cellVb.isBestPrice).toBe(false);
+    expect(cellVb.isWorstPrice).toBe(false);
+  });
+
+  it('expired vendor is excluded from best/worst/spread', () => {
+    const row = out.rows[0]!;
+    expect(row.bestUnitPrice).toBe(100);
+    expect(row.worstUnitPrice).toBe(110);
+    expect(row.bestVendorId).toBe('va');
+    expect(row.bidCount).toBe(2);
+  });
+
+  it('expired vendor summary does not inflate linesDeclined', () => {
+    const vbSummary = out.vendorSummaries.find((s) => s.vendorId === 'vb')!;
+    expect(vbSummary.linesDeclined).toBe(0);
+    expect(vbSummary.linesPriced).toBe(0);
+    // Lines count as no-bid for coverage purposes.
+    expect(vbSummary.linesNoBid).toBe(1);
+  });
+});
+
+describe('comparisonAgent — pending vendor (not-live)', () => {
+  // Pending = vendor hasn't responded yet. Same matrix rendering as expired.
+  const vendors = [
+    mkVendor('va', 'Alpha'),
+    mkVendor('vb', 'Beta', 'pending'),
+    mkVendor('vc', 'Charlie'),
+  ];
+  const lines = [mkLine('line-1', 0)];
+  // Pending vendor would normally have NO row at all, but test the defensive
+  // case where a stale row exists — it must still be excluded.
+  const vendorLines = [
+    mkVL('vl-1', 'va', 'line-1', 100, 10_000),
+    mkVL('vl-2', 'vb', 'line-1', 50, 5_000),
+    mkVL('vl-3', 'vc', 'line-1', 110, 11_000),
+  ];
+  const out = comparisonAgent({ bidId: 'b', vendors, lines, vendorLines });
+
+  it('pending vendor cell is null-priced with declined=false', () => {
+    const row = out.rows[0]!;
+    const cellVb = row.cells.find((c) => c.vendorId === 'vb')!;
+    expect(cellVb.unitPrice).toBeNull();
+    expect(cellVb.totalPrice).toBeNull();
+    expect(cellVb.declined).toBe(false);
+    expect(cellVb.isBestPrice).toBe(false);
+    expect(cellVb.isWorstPrice).toBe(false);
+  });
+
+  it('pending vendor is excluded from best/worst/spread', () => {
+    const row = out.rows[0]!;
+    expect(row.bestUnitPrice).toBe(100);
+    expect(row.worstUnitPrice).toBe(110);
+    expect(row.bestVendorId).toBe('va');
+    expect(row.bidCount).toBe(2);
+  });
+
+  it('pending vendor summary does not inflate linesDeclined', () => {
+    const vbSummary = out.vendorSummaries.find((s) => s.vendorId === 'vb')!;
+    expect(vbSummary.linesDeclined).toBe(0);
+    expect(vbSummary.linesPriced).toBe(0);
+    expect(vbSummary.linesNoBid).toBe(1);
+  });
+});
+
 describe('comparisonAgent — tiebreak by coverage then alphabetical', () => {
   it('more lines priced wins over fewer when prices are tied', () => {
     const vendors = [
@@ -243,6 +331,35 @@ describe('comparisonAgent — tiebreak by coverage then alphabetical', () => {
     ];
     const out = comparisonAgent({ bidId: 'b', vendors, lines, vendorLines });
     expect(out.rows[0]!.bestVendorId).toBe('v2'); // Alpha < Zeta
+  });
+
+  it('alphabetical tiebreak is independent of input vendor order', () => {
+    // Run the same scenario with the vendor list reversed to confirm that
+    // Alpha wins regardless of insertion order. If the tiebreaker ever
+    // accidentally depends on vendor column order, this test fails.
+    const lines = [mkLine('l1', 0)];
+    const mkVendorLines = (alphaId: string, zetaId: string) => [
+      mkVL('vl-1', zetaId, 'l1', 100, 10_000),
+      mkVL('vl-2', alphaId, 'l1', 100, 10_000),
+    ];
+
+    // Order 1: [Zeta, Alpha]
+    const order1 = comparisonAgent({
+      bidId: 'b',
+      vendors: [mkVendor('vZ', 'Zeta'), mkVendor('vA', 'Alpha')],
+      lines,
+      vendorLines: mkVendorLines('vA', 'vZ'),
+    });
+    expect(order1.rows[0]!.bestVendorId).toBe('vA');
+
+    // Order 2: [Alpha, Zeta]
+    const order2 = comparisonAgent({
+      bidId: 'b',
+      vendors: [mkVendor('vA', 'Alpha'), mkVendor('vZ', 'Zeta')],
+      lines,
+      vendorLines: mkVendorLines('vA', 'vZ'),
+    });
+    expect(order2.rows[0]!.bestVendorId).toBe('vA');
   });
 
   it('alphabetical tiebreak is case-insensitive', () => {
@@ -382,6 +499,42 @@ describe('comparisonAgent — vendor summary math', () => {
     expect(s2.linesNoBid).toBe(3);
     expect(s2.responseCoveragePercent).toBe(0.25);
     expect(s2.totalIfAllSelected).toBe(1100);
+  });
+});
+
+describe('comparisonAgent — input validation', () => {
+  it('throws on malformed input (missing bidId)', () => {
+    // Cast through unknown because we're deliberately violating the type.
+    const bad = {
+      vendors: [],
+      lines: [],
+      vendorLines: [],
+    } as unknown as ComparisonInput;
+    expect(() => comparisonAgent(bad)).toThrow();
+  });
+
+  it('throws on invalid unit enum value', () => {
+    const bad = {
+      bidId: 'b',
+      vendors: [],
+      lines: [
+        {
+          lineItemId: 'l1',
+          species: 'SPF',
+          dimension: '2x4',
+          grade: '#2',
+          length: '8',
+          quantity: 100,
+          // 'LF' is not a legal unit — must be PCS | MBF | MSF.
+          unit: 'LF',
+          buildingTag: null,
+          phaseNumber: null,
+          sortOrder: 0,
+        },
+      ],
+      vendorLines: [],
+    } as unknown as ComparisonInput;
+    expect(() => comparisonAgent(bad)).toThrow();
   });
 });
 
