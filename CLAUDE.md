@@ -581,7 +581,7 @@ Track progress here as modules are completed:
 - [x] PROMPT 01 — Supabase schema + auth
 - [x] PROMPT 02 — Ingest engine (tiered — rebuilt)
 - [x] PROMPT 03 — Routing engine
-- [ ] PROMPT 04 — Consolidation controls
+- [x] PROMPT 04 — Consolidation controls
 - [ ] PROMPT 05 — Vendor bid collection
 - [ ] PROMPT 06 — Comparison matrix
 - [ ] PROMPT 07 — Margin stacking + quote output
