@@ -210,9 +210,11 @@ lmbr-ai/                          ← root
 | State management | TanStack Query | Server state |
 | Forms | React Hook Form + Zod | Validation |
 | Charts | Recharts | Market intelligence dashboard |
+| Virtualization (web) | @tanstack/react-virtual | Comparison matrix; any list ≥ 50 rows |
 | Component base | shadcn/ui | Web only |
 | Icons | lucide-react | |
 | Date handling | date-fns | |
+| Unit tests (agents) | vitest | `pnpm --filter @lmbr/agents test` |
 
 ### Extraction Pipeline (Tiered — Cheapest Method First)
 
@@ -369,7 +371,14 @@ POST /api/vendor-submit    ← public submission endpoint (token-auth)
                               accepts digital-form line prices
 GET  /vendor-submit/[token]       ← public vendor web form (no auth)
 GET  /vendor-submit/[token]/print ← React-PDF printable tally
-POST /api/compare          ← build comparison matrix
+GET  /api/compare/[bidId]  ← build comparison matrix for a single bid.
+                              Session-auth + role gate (buyer,
+                              trader_buyer, manager, owner only —
+                              pure traders get 403). RLS-scoped reads
+                              only; service role is never used here.
+                              Data-loading helper lives at
+                              apps/web/src/lib/compare/load-comparison.ts
+                              and is shared with the RSC page.
 POST /api/margin           ← apply margin instructions
 POST /api/quote            ← generate PDF quote
 GET  /api/market           ← market price data
@@ -394,7 +403,7 @@ with a clear input/output contract.
 | `qa-agent.ts` | Reviews extraction, flags issues, scores confidence |
 | `routing-agent.ts` | Assigns line items to correct buyers |
 | `consolidation-agent.ts` | Aggregates items, maintains source mapping |
-| `comparison-agent.ts` | Ranks vendor pricing, suggests selection |
+| `comparison-agent.ts` | **Pure TypeScript** (no LLM). Ranks vendors per line with deterministic tiebreak (coverage → alphabetical); flags best/worst; computes spread; suggests `cheapest` + `fewestVendors` set-cover selections. Excludes `declined`/`expired`/`pending` vendors from ranking. Zod-validated input. |
 | `pricing-agent.ts` | Aggregates market data, analyzes archive |
 | `market-agent.ts` | Generates budget quotes from market data |
 | `scanback-agent.ts` | Matches handwritten OCR prices back to expected line_items (Haiku). |
@@ -612,7 +621,16 @@ Track progress here as modules are completed:
 - [x] PROMPT 03 — Routing engine
 - [x] PROMPT 04 — Consolidation controls
 - [x] PROMPT 05 — Vendor bid collection
-- [ ] PROMPT 06 — Comparison matrix
+- [x] PROMPT 06 — Comparison matrix
+    - **Prompt 07 hand-off notes:** The ComparisonMatrix `onExportSelection`
+      callback currently lands in `comparison-matrix-client.tsx` as a
+      `console.info` + `window.alert` placeholder. Prompt 07 should
+      replace it with a POST to the margin-stacking endpoint that
+      persists the trader's per-line vendor selections to
+      `quote_line_items` (or an intermediate table) so margin controls
+      load with the selection pre-populated. Mobile export at
+      `apps/mobile/src/app/bids/compare.tsx` is the same placeholder
+      (an `Alert.alert`) — same hand-off.
 - [ ] PROMPT 07 — Margin stacking + quote output
 - [ ] PROMPT 08 — Outlook integration
     - **Prompt 08 hand-off notes:** `POST /api/vendors/nudge` is a stub
