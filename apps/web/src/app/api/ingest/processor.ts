@@ -259,8 +259,12 @@ export async function processIngestJob(
 type ExtractionDecision = 'skip_claude' | 'mode_b' | 'mode_a';
 
 function decideExtractionPath(overallConfidence: number): ExtractionDecision {
-  if (overallConfidence >= EXTRACTION_CONFIDENCE_THRESHOLD) return 'skip_claude';
-  if (overallConfidence >= MODE_A_CUTOFF) return 'mode_b';
+  // Round both sides to 4 decimal places so floating-point arithmetic
+  // (e.g. 0.9199999999999999) doesn't miss the threshold.
+  const conf = Math.round(overallConfidence * 10000) / 10000;
+  const threshold = Math.round(EXTRACTION_CONFIDENCE_THRESHOLD * 10000) / 10000;
+  if (conf >= threshold) return 'skip_claude';
+  if (conf >= MODE_A_CUTOFF) return 'mode_b';
   return 'mode_a';
 }
 
