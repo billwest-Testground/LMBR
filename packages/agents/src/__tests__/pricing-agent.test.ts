@@ -347,6 +347,38 @@ describe('pricingAgent — tax math', () => {
   });
 });
 
+describe('pricingAgent — no instruction match', () => {
+  it('emits warning and sets appliedInstructionIndex=-1 when no instruction matches a line', () => {
+    // 1 SPF line; the margin instruction targets commodity 'Cedar' → no match.
+    // Expected: line carries 0% margin, appliedInstructionIndex === -1,
+    // and flags.warnings references the unmatched line id.
+    const line = mkLine('li-spf-1', 0, { species: 'SPF' });
+    const sel = mkSelection('li-spf-1', 10);
+    const result = pricingAgent(
+      baseInput({
+        lines: [line],
+        selections: [sel],
+        marginInstructions: [
+          {
+            scope: 'commodity',
+            targetId: 'Cedar',
+            marginType: 'percent',
+            marginValue: 0.2,
+          },
+        ],
+      }),
+    );
+    const priced = result.lines.find((l) => l.lineItemId === 'li-spf-1')!;
+    expect(priced.marginPercent).toBe(0);
+    expect(priced.appliedInstructionIndex).toBe(-1);
+    // sell falls back to cost when no instruction matched
+    expect(priced.sellUnitPrice).toBe(10);
+    expect(
+      result.flags.warnings.some((w) => w.includes('li-spf-1')),
+    ).toBe(true);
+  });
+});
+
 describe('pricingAgent — unresolved lines', () => {
   it('excludes unresolved lines from totals but surfaces them on the result', () => {
     const lines = [mkLine('li-1', 0), mkLine('li-2', 1)];

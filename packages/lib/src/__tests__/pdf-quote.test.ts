@@ -229,4 +229,15 @@ describe('QuotePdfInput type shape', () => {
     expectTypeOf<QuotePdfInput>().not.toHaveProperty('marginPercent');
     expectTypeOf<QuotePdfInput>().not.toHaveProperty('marginDollars');
   });
+
+  it('PdfPricedLineInput has no vendor, cost, or margin fields (type-level)', () => {
+    // The input shape the /api/quote route builds from quote_line_items
+    // is also vendor-/cost-/margin-free by contract. These assertions
+    // make sure a future refactor can't leak internal fields into a
+    // customer-facing projection.
+    expectTypeOf<PdfPricedLineInput>().not.toHaveProperty('vendorId');
+    expectTypeOf<PdfPricedLineInput>().not.toHaveProperty('costUnitPrice');
+    expectTypeOf<PdfPricedLineInput>().not.toHaveProperty('costTotalPrice');
+    expectTypeOf<PdfPricedLineInput>().not.toHaveProperty('marginPercent');
+  });
 });

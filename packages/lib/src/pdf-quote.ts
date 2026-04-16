@@ -49,6 +49,17 @@ export type PdfConsolidationMode =
 export type PdfLineUnit = 'PCS' | 'MBF' | 'MSF';
 
 /**
+ * Narrow an arbitrary string to `PdfLineUnit`, returning `null` when
+ * the unit is unrecognized. The route handler uses this to decide
+ * between "reject the release" (unit must be known before money goes
+ * out) and "fall back on preview with a warning" (trader can see the
+ * flag in the UI without blocking iteration).
+ */
+export function narrowPdfLineUnit(raw: unknown): PdfLineUnit | null {
+  return raw === 'PCS' || raw === 'MBF' || raw === 'MSF' ? raw : null;
+}
+
+/**
  * Minimal priced-line shape the PDF builder needs. The caller passes a
  * projection of `PricingResult.lines` with ONLY the fields below — in
  * particular, vendorId / costUnitPrice / costTotalPrice / marginPercent

@@ -30,3 +30,4 @@ export * from './queue';
 export * from './vendor-token';
 export * from './vendor-visibility';
 export * from './pdf-quote';
+export * from './quote-release-gate';

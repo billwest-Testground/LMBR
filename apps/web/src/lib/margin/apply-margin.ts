@@ -349,27 +349,34 @@ export async function applyMargin(
   }
 
   // --- Advance bid status (narrow state transitions) ------------------------
-  if (
-    bid.status === 'quoting' ||
-    bid.status === 'comparing'
-  ) {
-    const nextBidStatus = targetStatus === 'pending_approval' ? 'pending_approval' : 'pricing';
+  // Both branches treat a failed advance as NON-FATAL: the quote row
+  // was already written successfully, and the bid status is recoverable
+  // on the next save. Either we warn+continue consistently, or we must
+  // surface via db_error consistently — mixing the two (one warns, the
+  // other silently awaits) hides real failures in production. Pick
+  // warn-continue and apply it to both.
+  if (bid.status === 'quoting' || bid.status === 'comparing') {
+    const nextBidStatus =
+      targetStatus === 'pending_approval' ? 'pending_approval' : 'pricing';
     const { error: bidUpdateError } = await admin
       .from('bids')
       .update({ status: nextBidStatus })
       .eq('id', bidId);
-    // Non-fatal — we already wrote the quote. Surface via warnings on
-    // pricing if this becomes a real pain point.
     if (bidUpdateError) {
       console.warn(
         `LMBR.ai applyMargin: bid status advance failed for ${bidId}: ${bidUpdateError.message}`,
       );
     }
   } else if (bid.status === 'pricing' && targetStatus === 'pending_approval') {
-    await admin
+    const { error: bidUpdateError } = await admin
       .from('bids')
       .update({ status: 'pending_approval' })
       .eq('id', bidId);
+    if (bidUpdateError) {
+      console.warn(
+        `LMBR.ai applyMargin: bid status advance failed for ${bidId}: ${bidUpdateError.message}`,
+      );
+    }
   }
 
   return {

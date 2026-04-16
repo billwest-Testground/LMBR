@@ -16,8 +16,21 @@
  *               quote status to 'approved' / 'sent'.
  *
  *           Release semantics:
- *             - Allocates the next quote number via the `next_quote_number`
- *               RPC (migration 018) and formats as `${SLUG}-${00000}`.
+ *             - Gates on the freshly-read quote.status via canReleaseQuote:
+ *               'pending_approval' and 'approved' are allowed; 'draft',
+ *               'sent', 'accepted', 'declined' return 409. This prevents
+ *               a manager from bypassing the pending_approval gate or
+ *               silently overwriting a sent quote.
+ *             - Unit sanity: if any quote_line_item carries a unit other
+ *               than PCS/MBF/MSF, release fails with 422 'invalid_unit'
+ *               (preview still renders but exposes offending line ids
+ *               via the `X-Quote-Warnings` response header).
+ *             - Renders twice: once with a placeholder quote number to
+ *               prove the pipeline works, THEN allocates next_quote_number
+ *               (migration 018), THEN re-renders with the real number.
+ *               This keeps the customer-visible sequence gap-free even
+ *               when a render fails — releases are infrequent so the
+ *               extra render is cheap insurance.
  *             - Uploads to the `quotes` Supabase Storage bucket. The
  *               bucket must be provisioned out-of-band (Supabase CLI or
  *               dashboard); a missing bucket surfaces as a readable
@@ -41,9 +54,12 @@ import { z } from 'zod';
 
 import {
   buildQuotePdfInput,
+  canReleaseQuote,
   getSupabaseAdmin,
+  narrowPdfLineUnit,
   type PdfConsolidationMode,
   type PdfPricedLineInput,
+  type QuoteStatus,
 } from '@lmbr/lib';
 
 import { renderQuotePdfBuffer } from '../../../lib/pdf/quote-pdf';
@@ -198,6 +214,21 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       );
     }
 
+    // --- Release-only: gate on the freshly-read status --------------------
+    // We read `quotes` at the top so this is already the latest row. Re-
+    // checking here (before any render / RPC / upload) prevents a manager
+    // from bypassing pending_approval and also rejects post-send edits
+    // cleanly instead of silently overwriting a 'sent' quote.
+    if (action === 'release') {
+      const gate = canReleaseQuote(quote.status as QuoteStatus);
+      if (!gate.ok) {
+        return NextResponse.json(
+          { error: gate.error, message: gate.message },
+          { status: 409 },
+        );
+      }
+    }
+
     // --- Load quote_line_items (already vendor-name-free) -----------------
     const { data: qliRows, error: qliError } = await supabase
       .from('quote_line_items')
@@ -232,15 +263,23 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       (liRows ?? []).map((r) => [r.id as string, r] as const),
     );
 
+    // Track lines whose `unit` is unrecognized. On release we reject
+    // (it would print a wrong UOM on a real customer PDF — a money
+    // mistake). On preview we still render but surface the offending
+    // line ids in a `warnings` field so the margin-stack UI can flag
+    // them to the trader.
+    const unitWarnings: string[] = [];
     const pricedLines: PdfPricedLineInput[] = qli
       .map((row): PdfPricedLineInput | null => {
         const li = liById.get(row.line_item_id as string);
         if (!li) return null;
-        const unitRaw = li.unit as string;
-        const unit: 'PCS' | 'MBF' | 'MSF' =
-          unitRaw === 'MBF' || unitRaw === 'MSF' ? unitRaw : 'PCS';
+        const unit = narrowPdfLineUnit(li.unit);
+        const lineItemId = row.line_item_id as string;
+        if (unit === null) {
+          unitWarnings.push(lineItemId);
+        }
         return {
-          lineItemId: row.line_item_id as string,
+          lineItemId,
           sortOrder: Number(row.sort_order ?? 0),
           buildingTag: (row.building_tag as string | null) ?? null,
           phaseNumber: (row.phase_number as number | null) ?? null,
@@ -249,77 +288,90 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           grade: (li.grade as string | null) ?? null,
           length: (li.length as string | null) ?? null,
           quantity: Number(li.quantity),
-          unit,
+          // Preview still needs a renderable unit; fall back to PCS for
+          // the preview path only. Release reaches the 422 below before
+          // this value is ever shipped to a customer.
+          unit: unit ?? 'PCS',
           sellUnitPrice: Number(row.sell_price),
           extendedSell: Number(row.extended_sell),
         };
       })
       .filter((r): r is PdfPricedLineInput => r !== null);
 
-    // --- Mint a quote number ----------------------------------------------
-    // Preview uses the existing quote number (if any) or a PREVIEW marker
-    // so we don't bump the sequence before the user actually releases.
-    let quoteNumber: string;
-    let allocatedSequence: number | null = null;
-    if (action === 'release') {
-      const { data: seqData, error: seqError } = await supabase.rpc(
-        'next_quote_number',
-        { p_company_id: profile.company_id },
+    if (action === 'release' && unitWarnings.length > 0) {
+      return NextResponse.json(
+        {
+          error: 'invalid_unit',
+          message: 'Line item has unsupported unit; check extraction output',
+          lineItemIds: unitWarnings,
+        },
+        { status: 422 },
       );
-      if (seqError) {
-        return NextResponse.json(
-          { error: `Quote number allocation failed: ${seqError.message}` },
-          { status: 500 },
-        );
-      }
-      allocatedSequence = Number(seqData);
-      quoteNumber = formatQuoteNumber(
-        (company.slug as string) ?? '',
-        allocatedSequence,
-      );
-    } else {
-      quoteNumber = `${((company.slug as string) ?? 'LMBR').toUpperCase()}-PREVIEW`;
     }
 
-    // --- Build PDF input + render -----------------------------------------
+    // --- Build PDF input (quote number threaded in below) -----------------
+    // Order of operations for release:
+    //   1. Build input with a PLACEHOLDER quote number.
+    //   2. Render once (proves the render pipeline works for THIS data
+    //      and with THIS renderer — fonts, layout, etc.).
+    //   3. THEN call next_quote_number so the sequence only bumps when we
+    //      are confident we can produce a PDF. Rendering first and
+    //      allocating second is a cheap insurance policy against visible
+    //      gaps in the customer-facing sequence (ACME-01022, then skip
+    //      01023, then 01024 would generate support tickets in prod).
+    //   4. Re-render with the real quote number so the on-page "Quote #"
+    //      matches the row we're about to write.
+    //
+    // Preview just uses a "-PREVIEW" marker — no sequence cost, single
+    // render.
     const quoteDate = new Date();
     const validUntil = new Date(
       quoteDate.getTime() + VALIDITY_DAYS * 24 * 60 * 60 * 1000,
     );
 
-    const pdfInput = buildQuotePdfInput({
-      pricedLines,
-      totals: {
-        lumberTax: Number(quote.lumber_tax),
-        salesTax: Number(quote.sales_tax),
-        grandTotal: Number(quote.total),
-      },
-      bid: {
-        customerName: (bid.customer_name as string) ?? '',
-        jobName: (bid.job_name as string | null) ?? null,
-        jobAddress: (bid.job_address as string | null) ?? null,
-        jobState: (bid.job_state as string | null) ?? null,
-        consolidationMode:
-          ((bid.consolidation_mode as PdfConsolidationMode) ?? 'structured'),
-      },
-      company: {
-        name: (company.name as string) ?? 'LMBR.ai',
-        slug: (company.slug as string) ?? 'lmbr',
-        emailDomain: (company.email_domain as string | null) ?? null,
-      },
-      quoteNumber,
-      quoteDate,
-      validUntil,
-    });
+    const placeholderQuoteNumber =
+      action === 'release'
+        ? `${((company.slug as string) ?? 'LMBR').toUpperCase()}-PENDING`
+        : `${((company.slug as string) ?? 'LMBR').toUpperCase()}-PREVIEW`;
+
+    const buildInput = (quoteNumber: string): ReturnType<typeof buildQuotePdfInput> =>
+      buildQuotePdfInput({
+        pricedLines,
+        totals: {
+          lumberTax: Number(quote.lumber_tax),
+          salesTax: Number(quote.sales_tax),
+          grandTotal: Number(quote.total),
+        },
+        bid: {
+          customerName: (bid.customer_name as string) ?? '',
+          jobName: (bid.job_name as string | null) ?? null,
+          jobAddress: (bid.job_address as string | null) ?? null,
+          jobState: (bid.job_state as string | null) ?? null,
+          consolidationMode:
+            ((bid.consolidation_mode as PdfConsolidationMode) ?? 'structured'),
+        },
+        company: {
+          name: (company.name as string) ?? 'LMBR.ai',
+          slug: (company.slug as string) ?? 'lmbr',
+          emailDomain: (company.email_domain as string | null) ?? null,
+        },
+        quoteNumber,
+        quoteDate,
+        validUntil,
+      });
 
     let buffer: Buffer;
     try {
-      buffer = await renderQuotePdfBuffer(pdfInput);
+      buffer = await renderQuotePdfBuffer(buildInput(placeholderQuoteNumber));
     } catch (err) {
       const message =
         err instanceof Error ? err.message : 'Quote PDF render failed';
       return NextResponse.json({ error: message }, { status: 500 });
     }
+
+    // For preview the placeholder-rendered buffer IS the final output.
+    let quoteNumber: string = placeholderQuoteNumber;
+    let allocatedSequence: number | null = null;
 
     // --- Preview: return PDF bytes inline ---------------------------------
     if (action === 'preview') {
@@ -334,14 +386,54 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         buffer.byteOffset + buffer.byteLength,
       ) as ArrayBuffer;
       const pdfBody = new Blob([pdfArrayBuffer], { type: 'application/pdf' });
-      return new NextResponse(pdfBody, {
-        status: 200,
-        headers: {
-          'Content-Type': 'application/pdf',
-          'Content-Disposition': `inline; filename="${quoteNumber}.pdf"`,
-          'Cache-Control': 'no-store',
-        },
-      });
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `inline; filename="${quoteNumber}.pdf"`,
+        'Cache-Control': 'no-store',
+      };
+      if (unitWarnings.length > 0) {
+        // Preview keeps the PDF body (trader still wants to see the
+        // rendered output) but exposes the list of bad-unit line ids
+        // via a header. The margin-stack UI reads this and surfaces
+        // the affected rows so the trader can fix the extraction
+        // before attempting a release (which would now 422).
+        headers['X-Quote-Warnings'] = JSON.stringify({
+          invalidUnitLineItemIds: unitWarnings,
+        });
+      }
+      return new NextResponse(pdfBody, { status: 200, headers });
+    }
+
+    // --- Release: allocate number AFTER render, then re-render -----------
+    // Rendering the placeholder buffer above proved the pipeline works
+    // for this data. Only now do we bump the quote sequence; if the RPC
+    // fails we haven't consumed a number and haven't uploaded anything.
+    const { data: seqData, error: seqError } = await supabase.rpc(
+      'next_quote_number',
+      { p_company_id: profile.company_id },
+    );
+    if (seqError) {
+      return NextResponse.json(
+        { error: `Quote number allocation failed: ${seqError.message}` },
+        { status: 500 },
+      );
+    }
+    allocatedSequence = Number(seqData);
+    quoteNumber = formatQuoteNumber(
+      (company.slug as string) ?? '',
+      allocatedSequence,
+    );
+
+    // Re-render with the real quote number so the on-page "Quote #"
+    // matches the `quotes` row + storage path we're about to write. The
+    // extra render costs ~100ms and only happens on release, which is
+    // infrequent by definition.
+    try {
+      buffer = await renderQuotePdfBuffer(buildInput(quoteNumber));
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'Quote PDF render failed';
+      return NextResponse.json({ error: message }, { status: 500 });
     }
 
     // --- Release: upload to Storage + flip pdf_url + status ---------------
