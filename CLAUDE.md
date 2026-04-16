@@ -379,8 +379,31 @@ GET  /api/compare/[bidId]  ← build comparison matrix for a single bid.
                               Data-loading helper lives at
                               apps/web/src/lib/compare/load-comparison.ts
                               and is shared with the RSC page.
-POST /api/margin           ← apply margin instructions
-POST /api/quote            ← generate PDF quote
+POST /api/margin           ← apply MarginInstruction[] to the selected
+                              vendor prices, run pricing-agent, upsert
+                              quotes + quote_line_items. Role gate =
+                              buyer/trader_buyer/manager/owner. Action
+                              is 'draft' or 'submit_for_approval'.
+                              Orchestration in
+                              apps/web/src/lib/margin/apply-margin.ts.
+POST /api/quote            ← render the customer quote PDF. Body:
+                              { bidId, action: 'preview' | 'release' }.
+                              Preview allowed for trader+; release is
+                              manager/owner only and gated by
+                              canReleaseQuote() on quote.status.
+                              Release renders first, then allocates
+                              next_quote_number, then re-renders — so
+                              a render failure never burns a number.
+POST /api/manager/approvals← GET lists pending_approval quotes for
+                              the manager's company. POST body
+                              { quoteId, action: 'approve' |
+                              'request_changes' | 'reject' }.
+                              Manager/Owner only. Uses service-role
+                              admin client to bypass RLS for the
+                              approval-column writes — the manual
+                              role + tenant check is the only gate
+                              there (see the SECURITY comment in
+                              apps/web/src/app/api/manager/approvals/route.ts).
 GET  /api/market           ← market price data
 POST /api/market/budget-quote ← AI budget estimate
 POST /api/webhook/outlook  ← Graph API email webhook
@@ -404,7 +427,7 @@ with a clear input/output contract.
 | `routing-agent.ts` | Assigns line items to correct buyers |
 | `consolidation-agent.ts` | Aggregates items, maintains source mapping |
 | `comparison-agent.ts` | **Pure TypeScript** (no LLM). Ranks vendors per line with deterministic tiebreak (coverage → alphabetical); flags best/worst; computes spread; suggests `cheapest` + `fewestVendors` set-cover selections. Excludes `declined`/`expired`/`pending` vendors from ranking. Zod-validated input. |
-| `pricing-agent.ts` | Aggregates market data, analyzes archive |
+| `pricing-agent.ts` | **Pure TypeScript** (no LLM). Applies `MarginInstruction[]` (scope: all/commodity/line; mode: percent/dollar) with last-write-wins semantics. Computes sell prices, blended margin %, CA lumber assessment + state sales tax, and flags `needsApproval` / `belowMinimumMargin` / `unresolvedLineItemIds`. Deterministic. Zod-validated input. |
 | `market-agent.ts` | Generates budget quotes from market data |
 | `scanback-agent.ts` | Matches handwritten OCR prices back to expected line_items (Haiku). |
 
@@ -622,16 +645,39 @@ Track progress here as modules are completed:
 - [x] PROMPT 04 — Consolidation controls
 - [x] PROMPT 05 — Vendor bid collection
 - [x] PROMPT 06 — Comparison matrix
-    - **Prompt 07 hand-off notes:** The ComparisonMatrix `onExportSelection`
-      callback currently lands in `comparison-matrix-client.tsx` as a
-      `console.info` + `window.alert` placeholder. Prompt 07 should
-      replace it with a POST to the margin-stacking endpoint that
-      persists the trader's per-line vendor selections to
-      `quote_line_items` (or an intermediate table) so margin controls
-      load with the selection pre-populated. Mobile export at
-      `apps/mobile/src/app/bids/compare.tsx` is the same placeholder
-      (an `Alert.alert`) — same hand-off.
-- [ ] PROMPT 07 — Margin stacking + quote output
+- [x] PROMPT 07 — Margin stacking + quote output
+    - **Invariant — vendor-free PDF by construction:** the
+      `QuotePdfInput` type in `packages/lib/src/pdf-quote.ts` does not
+      declare any vendor / cost / margin fields. The React-PDF renderer
+      in `apps/web/src/lib/pdf/quote-pdf.tsx` reads ONLY from
+      `QuotePdfInput`. `PdfPricedLineInput` has a type-level test
+      locking it to omit `vendorId` / `costUnitPrice` / `costTotalPrice`
+      / `marginPercent`. Do not weaken this — a future engineer adding
+      a vendor field to the PDF input type will fail both the runtime
+      fixture test and the `expectTypeOf` assertion.
+    - **Invariant — release gating:** `packages/lib/src/quote-release-gate.ts`
+      is the single source of truth for which `quote.status` values can
+      be released. `POST /api/quote { action: 'release' }` must call
+      `canReleaseQuote(status)` before any render or upload. Do not
+      inline a status check elsewhere.
+    - **Invariant — render-then-allocate:** the release path renders
+      first, then calls `next_quote_number` RPC, then re-renders with
+      the real number. This is the reason traders never see gaps in
+      their customer-facing quote sequence. Do not move allocation
+      ahead of render.
+    - **Client preview drift guard:** `margin-stack.tsx` imports
+      `STATE_SALES_TAX` and `CA_LUMBER_ASSESSMENT` directly from
+      `@lmbr/config`. Do not re-inline trimmed tax tables. Client
+      preview totals are clearly labeled ("Estimated" vs "Saved") and
+      swap to server-authoritative numbers on save.
+    - **Prompt 08 hand-off notes (Prompt 07 adds):** `POST /api/quote`
+      release flips `quotes.status` to `'approved'` and leaves the
+      `'sent'` transition + Outlook send to Prompt 08. The Manager
+      approval queue's `request_changes` action does not persist the
+      note today — add `quotes.approval_notes` (migration 019) if
+      Prompt 08 needs to surface the note in the Outlook email body.
+      Mobile push-notification registration for new approvals is
+      stubbed with a code comment pointing here.
 - [ ] PROMPT 08 — Outlook integration
     - **Prompt 08 hand-off notes:** `POST /api/vendors/nudge` is a stub
       today (returns `{ ok: true, stubbed: true }`) — wire it to Graph
@@ -643,6 +689,10 @@ Track progress here as modules are completed:
       column ships, thread it through the render props. Cost ledger
       TODO: add `'scanback_llm'` enum value to `CostMethodSchema`
       (currently aliased as `'qa_llm'` in `/api/extract`).
+      Quote delivery: the "Send via Outlook" modal at
+      `apps/web/src/components/bids/quote-preview-client.tsx` is a
+      labeled stub — Prompt 08 wires Graph API sendmail and flips
+      `quotes.status` `'approved'` → `'sent'`.
 - [ ] PROMPT 09 — Market intelligence layer
 - [ ] PROMPT 10 — Archive + knowledge base
 - [ ] PROMPT 11 — Settings + company config
