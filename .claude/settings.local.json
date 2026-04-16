@@ -41,7 +41,17 @@
       "Bash(awk -F= '{print \\($2 != \"\" ? \"SET\" : \"EMPTY\"\\)}')",
       "Bash(npx tsx *)",
       "Bash(pnpm exec *)",
-      "Bash(pnpm remove *)"
+      "Bash(pnpm remove *)",
+      "Bash(pnpm -C packages/lib type-check)",
+      "Bash(pnpm -C packages/types type-check)",
+      "Bash(pnpm typecheck *)",
+      "Bash(awk -F'[\\(:]' '{print $1}')",
+      "Bash(pnpm --filter @lmbr/web typecheck)",
+      "Bash(pnpm -C apps/web exec tsc --version)",
+      "Bash(awk -F':' '{print $1}')",
+      "Bash(pnpm -C packages/agents type-check)",
+      "Bash(pnpm *)",
+      "Bash(npx next *)"
     ]
   }
 }
