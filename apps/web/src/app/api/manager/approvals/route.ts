@@ -221,6 +221,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     // --- Apply verdict ----------------------------------------------------
+    // SECURITY: this admin client bypasses RLS on quotes.approved_by /
+    // approved_at / status. The manual manager/owner role check at lines
+    // 181-202 above (session lookup + roles query + MANAGER_ROLES guard)
+    // plus the tenant check at lines 205-221 (company_id match) are the
+    // ONLY gates protecting these writes. DO NOT move or remove those
+    // checks without adding an equivalent server-side guard here. See
+    // migration 008 (quotes_update policy) for the RLS clause we're
+    // intentionally sidestepping — service role bypasses it by design
+    // and we enforce the equivalent logic in TypeScript above.
     const admin = getSupabaseAdmin();
     const payload: Record<string, unknown> = {};
     if (parsed.data.action === 'approve') {

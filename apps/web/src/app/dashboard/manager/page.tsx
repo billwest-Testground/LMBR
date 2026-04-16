@@ -22,12 +22,12 @@
  * Built by Worklighter.
  */
 
-import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
-import { ArrowRight, Inbox, ShieldOff } from 'lucide-react';
+import { Inbox, ShieldOff } from 'lucide-react';
 
 import { getSupabaseRSCClient } from '../../../lib/supabase/server';
 import { cn } from '../../../lib/cn';
+import { ApprovalRowActions } from '../../../components/dashboard/approval-row-actions';
 
 export const dynamic = 'force-dynamic';
 
@@ -183,8 +183,8 @@ export default async function ManagerDashboardPage() {
                 <Th align="right">Total</Th>
                 <Th align="right">Blended</Th>
                 <Th align="left">Submitted</Th>
-                <Th align="right" className="w-24">
-                  <span className="sr-only">Review</span>
+                <Th align="right" className="w-[22rem]">
+                  <span className="sr-only">Actions</span>
                 </Th>
               </tr>
             </thead>
@@ -220,13 +220,10 @@ export default async function ManagerDashboardPage() {
                     {formatRelative(new Date(row.submittedAt).getTime())}
                   </td>
                   <td className="border-b border-border-subtle px-3 py-3 text-right">
-                    <Link
-                      href={`/bids/${row.bidId}/margin`}
-                      className="inline-flex items-center gap-1 text-body-sm text-accent-primary transition-colors duration-micro hover:text-accent-secondary"
-                    >
-                      Review
-                      <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
-                    </Link>
+                    <ApprovalRowActions
+                      quoteId={row.quoteId}
+                      bidId={row.bidId}
+                    />
                   </td>
                 </tr>
               ))}

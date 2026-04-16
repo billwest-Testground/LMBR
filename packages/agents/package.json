@@ -5,6 +5,10 @@
   "description": "LMBR.ai Claude-powered agents: ingest, QA, extraction, routing, pricing, comparison, market intel. Orchestrates the bid automation workflow.",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./routing-agent": "./src/routing-agent.ts"
+  },
   "scripts": {
     "build": "tsc",
     "type-check": "tsc --noEmit",

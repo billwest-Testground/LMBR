@@ -18,6 +18,7 @@
     "paths": {
       "@/*": ["./src/*"],
       "@lmbr/agents": ["../../packages/agents/src"],
+      "@lmbr/agents/routing-agent": ["../../packages/agents/src/routing-agent"],
       "@lmbr/types": ["../../packages/types/src"],
       "@lmbr/lib": ["../../packages/lib/src"],
       "@lmbr/config": ["../../packages/config/src"]

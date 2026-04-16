@@ -13,9 +13,13 @@
  *           deliberately avoid importing pricingAgent itself because the
  *           @lmbr/agents barrel re-exports agents that depend on the
  *           Anthropic SDK — pulling that into the browser bundle is
- *           unnecessary for arithmetic. Persistence + approval flags are
- *           only fetched on explicit Save / Submit via onSave() which the
- *           thin client bridge wires to POST /api/margin.
+ *           unnecessary for arithmetic. commodityGroupFor is narrow-
+ *           imported from '@lmbr/agents/routing-agent' (pure TS, no SDK)
+ *           and the STATE_SALES_TAX / CA_LUMBER_ASSESSMENT tables come
+ *           direct from @lmbr/config — the same source the server
+ *           pricing-agent reads. On successful Save the summary panel
+ *           swaps to the server-authoritative PricingResult; margin
+ *           edits after save flag the display back to "unsaved changes".
  *
  *           Vendor-name column carries a permanent "Internal — not on PDF"
  *           chip per CLAUDE.md §"Key Product Rules" rule 1.
@@ -24,8 +28,9 @@
  *           jobState, consolidationMode, isManager, onSave).
  * Outputs:  JSX.
  * Agent/API: pricing math mirrored client-side; /api/margin only on save.
- * Imports:  @lmbr/agents (types only), lucide-react, ../ui/button,
- *           ../../lib/cn.
+ * Imports:  @lmbr/agents (types only), @lmbr/agents/routing-agent
+ *           (commodityGroupFor), @lmbr/config (tax tables), lucide-react,
+ *           ../ui/button, ../../lib/cn.
  *
  * LMBR.ai — Enterprise AI bid automation for wholesale lumber distributors.
  * Built by Worklighter.
@@ -57,6 +62,16 @@ import type {
   PricingResult,
   PricingSelection,
 } from '@lmbr/agents';
+// Narrow-import the commodity grouping helper directly from the routing-agent
+// submodule (see packages/agents/package.json `exports`). Going through the
+// barrel would transitively drag the Anthropic SDK + xlsx into the client
+// bundle; the submodule's only runtime dep is `normalizeSpecies` from
+// @lmbr/lib (pure function, no SDK).
+import { commodityGroupFor } from '@lmbr/agents/routing-agent';
+// Authoritative tax tables — shared with the server pricing-agent. Keeping
+// the client preview in sync with server math prevents the "saw $0, got real
+// tax after Save" surprise that the partial inlined table used to cause.
+import { STATE_SALES_TAX, CA_LUMBER_ASSESSMENT } from '@lmbr/config';
 
 import { Button } from '../ui/button';
 import { cn } from '../../lib/cn';
@@ -108,20 +123,8 @@ export interface MarginStackProps {
 }
 
 // -----------------------------------------------------------------------------
-// Commodity grouping (mirrors @lmbr/agents routing-agent commodityGroupFor
-// so we don't pull that module into the client bundle). Keep in sync if
-// the routing agent's species map changes.
+// Commodity grouping — imported from @lmbr/agents/routing-agent (see above).
 // -----------------------------------------------------------------------------
-
-function commodityGroupForClient(species: string): string {
-  const s = (species ?? '').trim();
-  if (['SPF', 'DF', 'HF', 'SYP'].includes(s)) return 'Dimensional';
-  if (s === 'Cedar') return 'Cedar';
-  if (s === 'LVL') return 'Engineered';
-  if (s === 'OSB' || s === 'Plywood') return 'Panels';
-  if (s === 'Treated') return 'Treated';
-  return s || 'Other';
-}
 
 const COMMODITY_GROUPS: Array<{ id: string; label: string }> = [
   { id: 'All', label: 'All' },
@@ -133,55 +136,16 @@ const COMMODITY_GROUPS: Array<{ id: string; label: string }> = [
 ];
 
 // -----------------------------------------------------------------------------
-// Tax helpers (mirrors the subset of @lmbr/config used by pricing-agent)
+// Tax helpers — STATE_SALES_TAX / CA_LUMBER_ASSESSMENT are imported from
+// @lmbr/config (same table pricing-agent consumes server-side). Keeping a
+// single source of truth means the preview number the trader sees while
+// editing matches the authoritative total returned on Save.
 // -----------------------------------------------------------------------------
-
-// Minimal subset — the exact full table lives in @lmbr/config and is
-// authoritative server-side. We only need a close-enough preview here.
-// The server recomputes authoritatively on Save / Submit.
-const STATE_SALES_TAX_CLIENT: Record<string, number> = {
-  CA: 0.0725,
-  TX: 0.0625,
-  FL: 0.06,
-  NY: 0.04,
-  WA: 0.065,
-  OR: 0,
-  NV: 0.0685,
-  AZ: 0.056,
-  CO: 0.029,
-  GA: 0.04,
-  NC: 0.0475,
-  VA: 0.053,
-  MA: 0.0625,
-  IL: 0.0625,
-  OH: 0.0575,
-  PA: 0.06,
-  MI: 0.06,
-  NJ: 0.06625,
-  MN: 0.06875,
-  WI: 0.05,
-  IN: 0.07,
-  TN: 0.07,
-  MO: 0.04225,
-  AL: 0.04,
-  LA: 0.0445,
-  SC: 0.06,
-  KY: 0.06,
-  MD: 0.06,
-  CT: 0.0635,
-  UT: 0.0485,
-  ID: 0.06,
-  MT: 0,
-  NH: 0,
-  DE: 0,
-  AK: 0,
-};
-const CA_LUMBER_ASSESSMENT_CLIENT = 0.01;
 
 function previewStateSalesTax(state: string | null): number {
   if (!state) return 0;
   const key = state.trim().toUpperCase();
-  return STATE_SALES_TAX_CLIENT[key] ?? 0;
+  return STATE_SALES_TAX[key] ?? 0;
 }
 
 // -----------------------------------------------------------------------------
@@ -284,7 +248,7 @@ function computePreview(params: {
 
   const state = (jobState ?? '').trim().toUpperCase();
   const salesRate = state ? previewStateSalesTax(state) : 0;
-  const lumberRate = state === 'CA' ? CA_LUMBER_ASSESSMENT_CLIENT : 0;
+  const lumberRate = state === 'CA' ? CA_LUMBER_ASSESSMENT : 0;
 
   const sorted = [...lines].sort((a, b) => {
     if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
@@ -302,7 +266,7 @@ function computePreview(params: {
 
   for (const line of sorted) {
     const sel = selectionByLine.get(line.lineItemId);
-    const group = commodityGroupForClient(line.species);
+    const group = commodityGroupFor(line.species);
     if (!sel) {
       unresolved.push(line.lineItemId);
       previewLines.push({
@@ -435,9 +399,12 @@ export function MarginStack({
   }, [initialSelections]);
 
   // --- Margin instruction stack (bulk pushes + per-line overrides) ---------
-  const [instructions, setInstructions] = React.useState<MarginInstruction[]>(
-    [],
-  );
+  // Wrapping setInstructions in a helper so every mutation auto-flips
+  // `pristineSinceSave` → false (see below). Keeps the two state slices in
+  // sync without spraying extra calls across every control.
+  const [instructions, setInstructionsState] = React.useState<
+    MarginInstruction[]
+  >([]);
 
   // --- Bulk-panel client state ---------------------------------------------
   const [activeScopeId, setActiveScopeId] = React.useState<string>('All');
@@ -451,6 +418,30 @@ export function MarginStack({
   const [serverError, setServerError] = React.useState<string | null>(null);
   const [savedQuoteStatus, setSavedQuoteStatus] = React.useState<string | null>(
     null,
+  );
+
+  // --- Authoritative server result (populated on successful save) ----------
+  // The client preview is always recomputed live for immediate feedback while
+  // the trader is editing, but the right-side summary swaps to the server's
+  // PricingResult once a Save has succeeded *and* no margin mutation has
+  // happened since. That's the "pristineSinceSave" flag — it flips false on
+  // any margin edit and back to true on every successful save. This means
+  // the trader never leaves the page believing the client-estimated total
+  // is the authoritative number.
+  const [savedPricing, setSavedPricing] = React.useState<PricingResult | null>(
+    null,
+  );
+  const [pristineSinceSave, setPristineSinceSave] =
+    React.useState<boolean>(false);
+
+  // Every margin mutation goes through this helper so the "unsaved changes"
+  // state flips automatically; the caller never needs to remember.
+  const setInstructions = React.useCallback(
+    (updater: React.SetStateAction<MarginInstruction[]>) => {
+      setInstructionsState(updater);
+      setPristineSinceSave(false);
+    },
+    [],
   );
 
   // --- Derived preview (re-computed on every state change; cheap) ----------
@@ -556,6 +547,11 @@ export function MarginStack({
       try {
         const result = await onSave(action, instructions);
         setSavedQuoteStatus(result.quote.status);
+        // Replace the displayed summary with the server-authoritative
+        // PricingResult and flip pristineSinceSave → true so the right
+        // panel renders "Saved totals" instead of the client estimate.
+        setSavedPricing(result.pricing);
+        setPristineSinceSave(true);
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Save failed';
         setServerError(message);
@@ -567,9 +563,25 @@ export function MarginStack({
   );
 
   // --- Summary copy --------------------------------------------------------
-  const grandAboveThreshold = preview.needsApproval;
-  const grandTotal = preview.totals.grandTotal;
-  const blended = preview.totals.blendedMarginPercent;
+  // Data-source resolution: if we have a saved PricingResult *and* no edits
+  // have happened since the save, render the server numbers. Otherwise fall
+  // back to the client preview (either initial state or dirty state).
+  type TotalsSource = 'saved' | 'dirty' | 'estimated';
+  const totalsSource: TotalsSource =
+    savedPricing && pristineSinceSave
+      ? 'saved'
+      : savedPricing
+        ? 'dirty'
+        : 'estimated';
+
+  const displayTotals =
+    totalsSource === 'saved' ? savedPricing!.totals : preview.totals;
+  const grandAboveThreshold =
+    totalsSource === 'saved'
+      ? savedPricing!.flags.needsApproval
+      : preview.needsApproval;
+  const grandTotal = displayTotals.grandTotal;
+  const blended = displayTotals.blendedMarginPercent;
   const minMargin = settings.minMarginPercent;
 
   // Three-tier health indicator: green > min + 0.02, red < min, yellow in between.
@@ -763,8 +775,11 @@ export function MarginStack({
         {/* Right panel — summary --------------------------------------- */}
         <aside className="flex flex-col gap-4 self-start rounded-md border border-border-base bg-bg-surface p-4 shadow-sm xl:sticky xl:top-4">
           <div>
-            <div className="text-label uppercase text-text-tertiary">
-              Grand total
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-label uppercase text-text-tertiary">
+                Grand total
+              </div>
+              <TotalsSourceChip source={totalsSource} />
             </div>
             <div className="mt-1 font-mono text-[28px] font-semibold leading-none tabular-nums text-text-primary">
               {USD.format(grandTotal)}
@@ -773,16 +788,16 @@ export function MarginStack({
 
           <SummaryRow
             label="Subtotal (sell)"
-            value={USD.format(preview.totals.totalSell)}
+            value={USD.format(displayTotals.totalSell)}
           />
           <SummaryRow
             label="Cost (internal)"
-            value={USD.format(preview.totals.totalCost)}
+            value={USD.format(displayTotals.totalCost)}
             tone="secondary"
           />
           <SummaryRow
             label="Margin $"
-            value={USD.format(preview.totals.marginDollars)}
+            value={USD.format(displayTotals.marginDollars)}
             tone="warm"
           />
           <SummaryRow
@@ -792,12 +807,12 @@ export function MarginStack({
           />
           <SummaryRow
             label="Lumber assessment"
-            value={USD.format(preview.totals.lumberTax)}
+            value={USD.format(displayTotals.lumberTax)}
             tone="tertiary"
           />
           <SummaryRow
             label="Sales tax"
-            value={USD.format(preview.totals.salesTax)}
+            value={USD.format(displayTotals.salesTax)}
             tone="tertiary"
           />
 
@@ -919,6 +934,54 @@ export function MarginStack({
         </aside>
       </div>
     </div>
+  );
+}
+
+// -----------------------------------------------------------------------------
+// Totals source chip
+// -----------------------------------------------------------------------------
+
+/**
+ * Tiny visual indicator next to the grand total that tells the trader where
+ * the number came from: client-side estimate, server-authoritative saved
+ * result, or server result now stale because the margin stack was edited
+ * after save. Prevents the trader walking away thinking the client preview
+ * is the ground truth.
+ */
+function TotalsSourceChip({
+  source,
+}: {
+  source: 'estimated' | 'saved' | 'dirty';
+}) {
+  if (source === 'saved') {
+    return (
+      <span
+        className="inline-flex items-center gap-1 rounded-pill border border-[rgba(29,184,122,0.4)] bg-[rgba(29,184,122,0.1)] px-2 py-0.5 text-label uppercase text-accent-primary"
+        aria-label="Totals are the server-authoritative saved values"
+      >
+        <CheckCircle2 className="h-3 w-3" aria-hidden="true" />
+        Saved totals
+      </span>
+    );
+  }
+  if (source === 'dirty') {
+    return (
+      <span
+        className="inline-flex items-center gap-1 rounded-pill border border-[rgba(232,168,50,0.4)] bg-[rgba(232,168,50,0.1)] px-2 py-0.5 text-label uppercase text-semantic-warning"
+        aria-label="Margin edited after save — totals below are re-estimated client-side; save to refresh"
+      >
+        <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+        Estimated (unsaved changes)
+      </span>
+    );
+  }
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded-pill border border-border-base bg-bg-subtle px-2 py-0.5 text-label uppercase text-text-tertiary"
+      aria-label="Totals are client-side estimates; save for authoritative numbers"
+    >
+      Estimated totals
+    </span>
   );
 }
 
