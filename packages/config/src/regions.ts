@@ -102,12 +102,107 @@ export function routeBidToRegion(stateCode: string | null | undefined): string |
 }
 
 /**
- * Given a region and commodity, return ordered preferred vendor ids.
- * // TODO: Prompt 05 — vendor dispatch will populate this
+ * Shape of a vendor candidate passed into {@link preferredVendorsForRegion}.
+ * Matches the rows returned by the `GET /api/vendors` route (Prompt 05,
+ * Task 2). Kept local to this package so `@lmbr/config` stays dep-free.
+ */
+export interface PreferredVendorCandidate {
+  id: string;
+  name: string;
+  vendorType: 'mill' | 'wholesaler' | 'distributor' | 'retailer';
+  regions: string[];        // empty = wildcard (serves every region)
+  commodities: string[];    // empty = no commodity match possible
+  active: boolean;
+  minOrderMbf: number;
+}
+
+/**
+ * Rank order for `vendorType` tie-breaking. Lower = higher priority.
+ * Mills sit at the top because they give the best mill-direct pricing
+ * on consolidated volume; retailers are last because they're used only
+ * as a fallback when no wholesale source is available.
+ */
+const VENDOR_TYPE_RANK: Readonly<Record<PreferredVendorCandidate['vendorType'], number>> =
+  Object.freeze({
+    mill: 0,
+    wholesaler: 1,
+    distributor: 2,
+    retailer: 3,
+  });
+
+/**
+ * Filter + rank vendor candidates for a bid's region/commodity shortlist.
+ *
+ * Pure function — pre-fetched vendors in, ordered id list out. The DB
+ * query lives in the caller (GET /api/vendors returns the shape this
+ * function consumes). Ranking favors explicit-region matches over
+ * wildcards, then mill > wholesaler > distributor > retailer, then
+ * alphabetical by name for stability.
+ *
+ * @param region      The bid's region, or null if unknown (wildcard).
+ * @param commodityId Commodity / species token — matched case-insensitively.
+ * @param vendors     Pre-fetched candidate list (e.g. from /api/vendors).
+ * @returns           Ordered vendor ids. Empty when no candidates match.
  */
 export function preferredVendorsForRegion(
-  _region: RegionId,
-  _commodityId: string,
+  region: RegionId | null,
+  commodityId: string,
+  vendors: readonly PreferredVendorCandidate[],
 ): readonly string[] {
-  return [];
+  // Early exits: no vendors, or no meaningful commodity token to match on.
+  if (vendors.length === 0) return Object.freeze([]);
+  const needle = commodityId?.trim().toLowerCase() ?? '';
+  if (!needle) return Object.freeze([]);
+
+  // Step 1: filter. Active, commodity match (case-insensitive), region match
+  // (wildcard-aware on both sides: empty vendor.regions is a wildcard, and
+  // null `region` means the bid itself has no regional constraint).
+  const matched = vendors.filter((v) => {
+    if (!v.active) return false;
+
+    const commodityMatch = v.commodities.some(
+      (c) => c.trim().toLowerCase() === needle,
+    );
+    if (!commodityMatch) return false;
+
+    if (region === null) return true;           // null region → accept all
+    if (v.regions.length === 0) return true;    // wildcard vendor
+    return v.regions.includes(region);
+  });
+
+  // Step 2: sort. Invariant — the comparator enforces this ordering:
+  //   (a) Vendors whose `regions[]` explicitly includes `region` rank
+  //       ABOVE wildcard-region vendors. When `region` is null, no vendor
+  //       can be "explicit" so all tie on this axis and we fall through.
+  //   (b) Within the same explicit/wildcard bucket, mills (0) sort before
+  //       wholesalers (1), distributors (2), retailers (3).
+  //   (c) Final tie-break: case-insensitive alphabetical by `name`, which
+  //       gives deterministic, test-friendly output across runs.
+  const sorted = [...matched].sort((a, b) => {
+    // (a) explicit-region priority
+    const aExplicit = region !== null && a.regions.includes(region) ? 0 : 1;
+    const bExplicit = region !== null && b.regions.includes(region) ? 0 : 1;
+    if (aExplicit !== bExplicit) return aExplicit - bExplicit;
+
+    // (b) vendor type rank (mill before wholesaler before distributor ...)
+    const aRank = VENDOR_TYPE_RANK[a.vendorType];
+    const bRank = VENDOR_TYPE_RANK[b.vendorType];
+    if (aRank !== bRank) return aRank - bRank;
+
+    // (c) alphabetical stability
+    return a.name.localeCompare(b.name, 'en', { sensitivity: 'base' });
+  });
+
+  // Step 3: dedupe by id defensively (preserve first occurrence).
+  // Input shouldn't contain duplicates but a caller bug here could
+  // silently ship duplicate dispatch rows, so we guard explicitly.
+  const seen = new Set<string>();
+  const ids: string[] = [];
+  for (const v of sorted) {
+    if (seen.has(v.id)) continue;
+    seen.add(v.id);
+    ids.push(v.id);
+  }
+
+  return Object.freeze(ids);
 }
