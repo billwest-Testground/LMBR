@@ -48,6 +48,7 @@ import {
 } from '@lmbr/lib';
 import type { ConsolidationMode } from '@lmbr/types';
 
+import { ScanUpload } from './scan-upload';
 import { SubmitForm, type SubmitFormLineItem, type SubmitFormExistingPrice } from './submit-form';
 
 // Note: BidRow still carries `consolidation_mode` because the server needs it
@@ -270,16 +271,72 @@ export default async function VendorSubmitPage({ params }: PageProps) {
     );
   }
 
+  // Two valid submission paths render side-by-side. Vendors with a web
+  // browser typically prefer Option A (type prices into the form). Vendors
+  // who printed the PDF and wrote prices by hand upload the scan under
+  // Option B — /api/extract reads the prices back via OCR + Haiku and
+  // writes them to the same vendor_bid_line_items rows Option A would.
+  // The two paths are not mutually exclusive; a vendor can upload a scan
+  // to seed most lines, then edit a few by hand before a final submit.
   return (
-    <SubmitForm
-      token={params.token}
-      companyName={company.name}
-      vendorName={vendor.name}
-      bidSummary={bidSummary}
-      dueBy={vendorBid.due_by}
-      lineItems={lineItems}
-      existingPrices={existingPrices}
-    />
+    <div className="space-y-8">
+      <SubmissionPathHeader step="A" title="Fill out prices here" />
+      <SubmitForm
+        token={params.token}
+        companyName={company.name}
+        vendorName={vendor.name}
+        bidSummary={bidSummary}
+        dueBy={vendorBid.due_by}
+        lineItems={lineItems}
+        existingPrices={existingPrices}
+      />
+
+      <div className="relative py-2">
+        <div
+          aria-hidden="true"
+          className="absolute inset-x-0 top-1/2 h-px bg-border-base"
+        />
+        <div className="relative mx-auto w-max bg-bg-base px-4 text-label uppercase text-text-tertiary">
+          or
+        </div>
+      </div>
+
+      <SubmissionPathHeader
+        step="B"
+        title="Upload scanned sheet"
+        subtitle="If you printed the tally PDF and wrote prices by hand."
+      />
+      <ScanUpload token={params.token} expectedLineCount={lineItems.length} />
+    </div>
+  );
+}
+
+function SubmissionPathHeader({
+  step,
+  title,
+  subtitle,
+}: {
+  step: 'A' | 'B';
+  title: string;
+  subtitle?: string;
+}) {
+  return (
+    <div className="flex items-baseline gap-3">
+      <span
+        aria-hidden="true"
+        className="inline-flex h-6 w-6 items-center justify-center rounded-sm bg-accent-primary text-label font-semibold text-text-inverse"
+      >
+        {step}
+      </span>
+      <div>
+        <h2 className="text-h4 text-text-primary">
+          Option {step}: {title}
+        </h2>
+        {subtitle && (
+          <p className="mt-0.5 text-body-sm text-text-tertiary">{subtitle}</p>
+        )}
+      </div>
+    </div>
   );
 }
 

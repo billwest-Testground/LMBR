@@ -1,413 +1,497 @@
 /**
- * POST /api/extract — Vendor scan-back price extraction.
+ * POST /api/extract — Public vendor scan-back price extraction.
  *
- * Purpose:  Vendor side of the tiered ingest engine. When a vendor
- *           responds by printing the fillable bid sheet, writing prices
- *           on it, and faxing or photographing it back, this route
- *           turns the image back into structured prices. It is NOT a
- *           full list extractor — the line item schema is already known
- *           from the vendor_bid_line_items rows we created when the
- *           buyer dispatched the bid. All we need is to read the unit
- *           price next to each line.
+ * Purpose:  Closes the paper workflow loop for vendors who printed the
+ *           Task 4 tally PDF, hand-wrote prices, and scanned the sheet
+ *           back. The token printed at the PDF footer is the only
+ *           authentication — same token the sibling POST /api/vendor-submit
+ *           accepts for the typed-form path. Both endpoints lead to the
+ *           same vendor_bid_line_items upsert; they differ only in how
+ *           the prices got there (form fields vs OCR + Haiku matcher).
  *
- *           Pipeline:
- *             1. Auth + parse multipart { vendor_bid_id, file }.
- *             2. Look up the vendor_bid_line_items for this vendor_bid
- *                so we know exactly which line_items Claude is matching
- *                prices against.
- *             3. OCR the uploaded file via Azure Document Intelligence.
- *             4. Ask Claude Haiku (cheap model — the schema is already
- *                fixed, so this is narrow matching work, not extraction)
- *                to match each known line item to a price in the OCR
- *                text. Claude returns per-line { unit_price, notes }
- *                or null if it can't find a confident match.
- *             5. Update vendor_bid_line_items.unit_price for each
- *                matched line. The is_best_price trigger will recompute
- *                the cheapest-per-line flag automatically.
- *             6. Return a per-line report so the buyer UI can highlight
- *                which lines were matched and which need manual entry.
+ *           Flow (on a valid token):
+ *             1. Parse multipart/form-data. Validate file type + size.
+ *             2. Verify token → fetch vendor_bids row → assert match.
+ *             3. Reject closed statuses ('expired' | 'declined') with
+ *                a generic 409; reject other failures with a generic 401.
+ *                Same error-opacity discipline as /api/vendor-submit —
+ *                never leak which token, vendor, bid, or company the
+ *                probe touched.
+ *             4. Load vendor-visible line_items (consolidated vs
+ *                originals, per vendorVisibleIsConsolidatedFlag).
+ *             5. OCR the uploaded file via Azure Document Intelligence.
+ *             6. Call scanbackAgent (Haiku tool_use) with OCR text +
+ *                expected lines — returns per-line matches, unmatched
+ *                IDs, and extra rows.
+ *             7. Upsert priced matches into vendor_bid_line_items with
+ *                server-computed total_price; delete any prior priced
+ *                row for a line_item_id that came back as unmatched
+ *                (a re-upload with a cleared price removes the old one).
+ *             8. Recompute pricedCount from the DB, reject if 0.
+ *             9. Flip vendor_bids.status to 'submitted' (all lines) or
+ *                'partial' (some), set submitted_at=now and
+ *                submission_method='scan' so the vendor-status board
+ *                shows the paper path was used.
+ *            10. Fire-and-forget: record OCR + scanback-agent cost to
+ *                extraction_costs so the manager dashboard shows the
+ *                true cost of this RFQ.
  *
- *           Model is Haiku because matching known line items to prices
- *           in OCR text is structurally easier than cold extraction —
- *           no normalization, no building groups, no building headers
- *           to preserve. Sonnet is overkill and 3× the cost per call.
+ *           Model policy: scanbackAgent pins Haiku per CLAUDE.md's
+ *           Model Split. This route does not set any model explicitly.
  *
- * Inputs:   multipart/form-data { vendor_bid_id: uuid, file: File }.
- * Outputs:  200 { vendor_bid_id, matches[], ocr_pages, total_cost_cents,
- *           applied_count }.
- *           4xx / 5xx { error }.
- * Agent/API: Azure Document Intelligence (OCR) + Claude Haiku.
- * Imports:  @lmbr/lib (analyzeDocument, getAnthropic, getSupabaseAdmin,
- *           recordExtraction, OcrError), zod, next/server.
+ *           File retention note: raw_response_url stays null. Object
+ *           storage for scanned images is not in scope for Prompt 05;
+ *           that lands alongside the Outlook integration work (Prompt 08).
+ *
+ * Inputs:   multipart/form-data { token: string, file: File }.
+ * Outputs:  200 { success, status, pricedCount, expectedCount,
+ *                 unmatchedLineItemIds[], extractionCostCents,
+ *                 ocrConfidence }
+ *           400 | 401 | 409 | 413 | 415 | 500 { error }
+ * Agent/API: Azure Document Intelligence + @lmbr/agents scanbackAgent
+ *            (Claude Haiku). Supabase service-role client for writes.
+ * Imports:  @lmbr/lib, @lmbr/agents, next/server.
  *
  * LMBR.ai — Enterprise AI bid automation for wholesale lumber distributors.
  * Built by Worklighter.
  */
 
 import { NextResponse, type NextRequest } from 'next/server';
-import { z } from 'zod';
 
+import { scanbackAgent, type ScanbackExpectedLine } from '@lmbr/agents';
 import {
   analyzeDocument,
-  getAnthropic,
+  assertTokenMatchesVendorBid,
   getSupabaseAdmin,
   OcrError,
   recordExtraction,
+  toNumber,
+  vendorVisibleIsConsolidatedFlag,
+  VendorTokenMismatchError,
+  verifyVendorBidToken,
 } from '@lmbr/lib';
-
-import { getSupabaseRouteHandlerClient } from '../../../lib/supabase/server';
+import type { ConsolidationMode } from '@lmbr/types';
 
 export const runtime = 'nodejs';
+// Azure OCR poll + Haiku call can take 20-40s end to end on a photographed
+// multi-page PDF. Bump maxDuration so we don't truncate mid-extraction.
 export const maxDuration = 60;
 
-const VendorBidIdSchema = z.string().uuid();
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
 
-const QA_EXTRACT_MODEL = 'claude-haiku-4-5-20251001';
+// Same generic error vocabulary used by /api/vendor-submit. Identical
+// strings on purpose — the two endpoints must not be distinguishable by
+// their error bodies, or the scan-back route becomes an oracle for the
+// form-path one.
+const GENERIC_AUTH_ERROR = 'Submission link is invalid or has expired.';
+const GENERIC_CLOSED_ERROR = 'This submission link is closed.';
 
-/** Same pricing constants the QA-agent Haiku pass uses. */
-const HAIKU_INPUT_CENTS_PER_MTOK = 100; // $1 / Mtok
-const HAIKU_OUTPUT_CENTS_PER_MTOK = 500; // $5 / Mtok
+// File validation. 25 MB cutoff matches typical phone-camera JPEG sizes
+// and multi-page scanned PDFs; anything bigger is very likely a user
+// mistake (raw DSLR photo, embedded RAW image).
+const MAX_FILE_BYTES = 25 * 1024 * 1024;
+const ALLOWED_MIME_TYPES = new Set<string>([
+  'image/png',
+  'image/jpeg',
+  'image/jpg', // some browsers/cameras report this non-standard variant
+  'image/webp',
+  'application/pdf',
+]);
 
-// -----------------------------------------------------------------------------
-// Route handler
-// -----------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Row types (same shape as /api/vendor-submit)
+// ---------------------------------------------------------------------------
+
+interface VendorBidRow {
+  id: string;
+  bid_id: string;
+  vendor_id: string;
+  company_id: string;
+  status: 'pending' | 'submitted' | 'partial' | 'declined' | 'expired';
+}
+
+interface BidRow {
+  id: string;
+  company_id: string;
+  consolidation_mode: ConsolidationMode;
+}
+
+interface LineItemRow {
+  id: string;
+  species: string;
+  dimension: string;
+  grade: string | null;
+  length: string | null;
+  quantity: number | string;
+  unit: string;
+  sort_order: number;
+}
+
+function unauthorized(): NextResponse {
+  return NextResponse.json({ error: GENERIC_AUTH_ERROR }, { status: 401 });
+}
+
+function closedLink(): NextResponse {
+  return NextResponse.json({ error: GENERIC_CLOSED_ERROR }, { status: 409 });
+}
+
+// ---------------------------------------------------------------------------
+// Handler
+// ---------------------------------------------------------------------------
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
-    const supabase = getSupabaseRouteHandlerClient();
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    if (!session) {
-      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
-    }
-
-    const { data: profile, error: profileError } = await supabase
-      .from('users')
-      .select('id, company_id')
-      .eq('id', session.user.id)
-      .maybeSingle();
-    if (profileError) {
-      return NextResponse.json({ error: profileError.message }, { status: 500 });
-    }
-    if (!profile?.company_id) {
-      return NextResponse.json(
-        { error: 'Finish onboarding before extracting prices.' },
-        { status: 400 },
-      );
-    }
-
+    // --- Content type gate -------------------------------------------------
     const contentType = req.headers.get('content-type') ?? '';
-    if (!contentType.startsWith('multipart/form-data')) {
+    if (!contentType.toLowerCase().startsWith('multipart/form-data')) {
       return NextResponse.json(
         { error: 'Expected multipart/form-data.' },
         { status: 415 },
       );
     }
 
-    const form = await req.formData();
-    const vendorBidIdRaw = form.get('vendor_bid_id');
-    if (typeof vendorBidIdRaw !== 'string') {
-      return NextResponse.json(
-        { error: 'vendor_bid_id is required.' },
-        { status: 400 },
-      );
+    // --- Parse form --------------------------------------------------------
+    let form: FormData;
+    try {
+      form = await req.formData();
+    } catch {
+      return NextResponse.json({ error: 'Invalid form body.' }, { status: 400 });
     }
-    const vendorBidIdParse = VendorBidIdSchema.safeParse(vendorBidIdRaw);
-    if (!vendorBidIdParse.success) {
-      return NextResponse.json(
-        { error: 'vendor_bid_id must be a UUID.' },
-        { status: 400 },
-      );
+
+    const tokenRaw = form.get('token');
+    if (typeof tokenRaw !== 'string' || tokenRaw.length === 0) {
+      return NextResponse.json({ error: 'No token provided.' }, { status: 400 });
     }
-    const vendorBidId = vendorBidIdParse.data;
 
     const file = form.get('file');
     if (!(file instanceof File)) {
+      return NextResponse.json({ error: 'No file uploaded.' }, { status: 400 });
+    }
+    if (file.size === 0) {
+      return NextResponse.json({ error: 'No file uploaded.' }, { status: 400 });
+    }
+    if (file.size > MAX_FILE_BYTES) {
       return NextResponse.json(
-        { error: 'file is required.' },
-        { status: 400 },
+        { error: 'File is too large. Maximum size is 25 MB.' },
+        { status: 413 },
       );
     }
-    const buffer = Buffer.from(await file.arrayBuffer());
-    const mimeType = file.type || 'application/octet-stream';
+    const mimeType = (file.type || '').toLowerCase();
+    if (!ALLOWED_MIME_TYPES.has(mimeType)) {
+      return NextResponse.json(
+        {
+          error:
+            'Unsupported file type. Upload a PNG, JPEG, WEBP image, or PDF.',
+        },
+        { status: 415 },
+      );
+    }
 
-    // Pull the vendor bid + its line items so we know the schema Claude
-    // is matching against. Use the session-scoped client so RLS applies.
-    const { data: vendorBid, error: vbError } = await supabase
+    // --- Token verify ------------------------------------------------------
+    const payload = verifyVendorBidToken(tokenRaw);
+    if (!payload) {
+      console.warn('LMBR.ai extract: token failed signature/format/expiry check.');
+      return unauthorized();
+    }
+
+    const admin = getSupabaseAdmin();
+
+    // --- vendor_bids row lookup -------------------------------------------
+    const { data: vbData, error: vbError } = await admin
       .from('vendor_bids')
-      .select('id, company_id, bid_id, vendor_id')
-      .eq('id', vendorBidId)
+      .select('id, bid_id, vendor_id, company_id, status')
+      .eq('id', payload.vendorBidId)
       .maybeSingle();
-    if (vbError || !vendorBid) {
-      return NextResponse.json(
-        { error: vbError?.message ?? 'vendor_bid not found' },
-        { status: 404 },
-      );
+    if (vbError) {
+      console.warn(`LMBR.ai extract: vendor_bids lookup failed: ${vbError.message}`);
+      return unauthorized();
     }
-    if (vendorBid.company_id !== profile.company_id) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    const vendorBid = vbData as VendorBidRow | null;
+    if (!vendorBid) {
+      console.warn(
+        `LMBR.ai extract: no vendor_bids row for id=${payload.vendorBidId}.`,
+      );
+      return unauthorized();
     }
 
-    const { data: vbli, error: vbliError } = await supabase
-      .from('vendor_bid_line_items')
-      .select(
-        'id, line_item_id, line_items(species, dimension, grade, length, quantity, unit)',
-      )
-      .eq('vendor_bid_id', vendorBidId);
-    if (vbliError) {
-      return NextResponse.json({ error: vbliError.message }, { status: 500 });
+    // --- Cross-check token payload vs row ----------------------------------
+    try {
+      assertTokenMatchesVendorBid(payload, {
+        id: vendorBid.id,
+        bid_id: vendorBid.bid_id,
+        vendor_id: vendorBid.vendor_id,
+        company_id: vendorBid.company_id,
+      });
+    } catch (err) {
+      if (err instanceof VendorTokenMismatchError) {
+        console.warn(`LMBR.ai extract: ${err.message}`);
+        return unauthorized();
+      }
+      throw err;
     }
-    const rows = vbli ?? [];
-    if (rows.length === 0) {
+
+    // --- Closed-status gate ------------------------------------------------
+    if (vendorBid.status === 'expired' || vendorBid.status === 'declined') {
+      console.warn(
+        `LMBR.ai extract: rejected because vendor_bids.status='${vendorBid.status}' (id=${vendorBid.id}).`,
+      );
+      return closedLink();
+    }
+
+    // --- Bid row (for consolidation_mode) ---------------------------------
+    const { data: bidData, error: bidError } = await admin
+      .from('bids')
+      .select('id, company_id, consolidation_mode')
+      .eq('id', vendorBid.bid_id)
+      .maybeSingle();
+    if (bidError || !bidData) {
+      console.warn(
+        `LMBR.ai extract: bid lookup failed for id=${vendorBid.bid_id}: ${bidError?.message ?? 'not found'}.`,
+      );
+      return unauthorized();
+    }
+    const bid = bidData as BidRow;
+
+    // --- Vendor-visible line_items ----------------------------------------
+    const isConsolidated = vendorVisibleIsConsolidatedFlag(bid.consolidation_mode);
+    const { data: linesData, error: linesError } = await admin
+      .from('line_items')
+      .select(
+        'id, species, dimension, grade, length, quantity, unit, sort_order',
+      )
+      .eq('bid_id', bid.id)
+      .eq('company_id', vendorBid.company_id)
+      .eq('is_consolidated', isConsolidated)
+      .order('sort_order', { ascending: true });
+    if (linesError) {
+      console.warn(
+        `LMBR.ai extract: line_items lookup failed: ${linesError.message}`,
+      );
       return NextResponse.json(
-        { error: 'This vendor bid has no line items to match against.' },
+        { error: 'Unable to load pricing request.' },
+        { status: 500 },
+      );
+    }
+    const lineRows = (linesData ?? []) as LineItemRow[];
+    const expectedCount = lineRows.length;
+    if (expectedCount === 0) {
+      // Nothing to price. Same generic error shape as the form path.
+      return NextResponse.json(
+        { error: 'This submission has no priceable lines.' },
         { status: 400 },
       );
     }
+    const quantityByLineId = new Map<string, number>(
+      lineRows.map((r) => [r.id, toNumber(r.quantity)]),
+    );
 
-    // ------- OCR the file -------
-    let ocrText: string;
-    let ocrPages: number;
-    let ocrCostCents: number;
+    // --- OCR the uploaded file --------------------------------------------
+    const arrayBuffer = await file.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    let ocrText = '';
+    let ocrPages = 0;
+    let ocrConfidence = 0;
+    let ocrCostCents = 0;
     try {
       const ocr = await analyzeDocument(buffer, mimeType);
       ocrText = ocr.text;
       ocrPages = ocr.pages;
+      ocrConfidence = ocr.confidence;
       ocrCostCents = ocr.costCents;
     } catch (err) {
       if (err instanceof OcrError) {
+        console.warn(`LMBR.ai extract: OCR failed: ${err.message}`);
         return NextResponse.json(
-          { error: `OCR failed: ${err.message}` },
-          { status: 502 },
+          { error: 'Extraction failed.' },
+          { status: 500 },
         );
       }
       throw err;
     }
 
-    // ------- Haiku price matcher -------
-    const matchResult = await matchPricesWithHaiku({
+    // --- Build expected lines for the agent -------------------------------
+    const expectedLines: ScanbackExpectedLine[] = lineRows.map((r) => ({
+      lineItemId: r.id,
+      sortOrder: r.sort_order,
+      species: r.species,
+      dimension: r.dimension,
+      grade: r.grade,
+      length: r.length,
+      quantity: toNumber(r.quantity),
+      unit: r.unit,
+    }));
+
+    // --- Run the scan-back agent ------------------------------------------
+    const scanResult = await scanbackAgent({
       ocrText,
-      rows: rows.map((row) => ({
-        vbli_id: row.id as string,
-        line: row.line_items as unknown as {
-          species?: string;
-          dimension?: string;
-          grade?: string | null;
-          length?: string | null;
-          quantity?: number;
-          unit?: string;
-        },
-      })),
+      ocrConfidence,
+      expectedLines,
+      companyId: vendorBid.company_id,
     });
 
-    // ------- Persist matched prices -------
-    // Service-role client because the RLS write policy on
-    // vendor_bid_line_items gates trader access; the orchestrator acts
-    // on behalf of the authenticated buyer.
-    const admin = getSupabaseAdmin();
-    const applied: Array<{ vbli_id: string; unit_price: number }> = [];
-    for (const match of matchResult.matches) {
-      if (match.unit_price == null) continue;
-      const { error: updateError } = await admin
-        .from('vendor_bid_line_items')
-        .update({
-          unit_price: match.unit_price,
-          notes: match.note ?? null,
-        })
-        .eq('id', match.vbli_id)
-        .eq('vendor_bid_id', vendorBidId);
-      if (!updateError) {
-        applied.push({ vbli_id: match.vbli_id, unit_price: match.unit_price });
+    // --- Partition matches: upsert priced, delete cleared -----------------
+    const nowIso = new Date().toISOString();
+
+    const toUpsert: Array<{
+      company_id: string;
+      vendor_bid_id: string;
+      line_item_id: string;
+      unit_price: number;
+      total_price: number;
+      notes: string | null;
+    }> = [];
+    const toDelete: string[] = [];
+
+    for (const match of scanResult.matchedLines) {
+      if (match.unitPrice == null) {
+        // Line didn't get a confident price. If there's an old priced row
+        // for this line from a prior scan/form submission, remove it so
+        // the user isn't silently left with stale data.
+        toDelete.push(match.lineItemId);
+        continue;
       }
-    }
-
-    // Fire-and-forget ledger rows. Group scan-back spend with the parent
-    // bid so the manager dashboard shows the full cost of ingesting +
-    // pricing a single RFQ in one place.
-    const totalCost = ocrCostCents + matchResult.haikuCostCents;
-    await recordExtraction({
-      bidId: vendorBid.bid_id as string,
-      companyId: profile.company_id,
-      method: 'ocr',
-      costCents: ocrCostCents,
-    });
-    if (matchResult.haikuCostCents > 0) {
-      await recordExtraction({
-        bidId: vendorBid.bid_id as string,
-        companyId: profile.company_id,
-        method: 'qa_llm',
-        costCents: matchResult.haikuCostCents,
+      const qty = quantityByLineId.get(match.lineItemId) ?? 0;
+      const total = match.unitPrice * qty;
+      toUpsert.push({
+        company_id: vendorBid.company_id,
+        vendor_bid_id: vendorBid.id,
+        line_item_id: match.lineItemId,
+        unit_price: match.unitPrice,
+        total_price: Number(total.toFixed(2)),
+        notes: match.notes,
       });
     }
 
-    return NextResponse.json(
-      {
-        vendor_bid_id: vendorBidId,
-        ocr_pages: ocrPages,
-        total_cost_cents: round4(totalCost),
-        matches: matchResult.matches,
-        applied_count: applied.length,
-      },
-      { status: 200 },
-    );
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'Extract failed';
-    return NextResponse.json({ error: message }, { status: 500 });
-  }
-}
+    if (toUpsert.length > 0) {
+      const { error: upsertError } = await admin
+        .from('vendor_bid_line_items')
+        .upsert(toUpsert, { onConflict: 'vendor_bid_id,line_item_id' });
+      if (upsertError) {
+        console.warn(
+          `LMBR.ai extract: upsert failed: ${upsertError.message}`,
+        );
+        return NextResponse.json(
+          { error: 'Unable to save pricing.' },
+          { status: 500 },
+        );
+      }
+    }
 
-// -----------------------------------------------------------------------------
-// Haiku price matcher
-// -----------------------------------------------------------------------------
+    if (toDelete.length > 0) {
+      // Delete only priced rows — rows without a unit_price are
+      // effectively untouched placeholders and don't need cleanup.
+      const { error: delError } = await admin
+        .from('vendor_bid_line_items')
+        .delete()
+        .eq('vendor_bid_id', vendorBid.id)
+        .in('line_item_id', toDelete)
+        .not('unit_price', 'is', null);
+      if (delError) {
+        console.warn(
+          `LMBR.ai extract: cleanup delete failed: ${delError.message}`,
+        );
+        return NextResponse.json(
+          { error: 'Unable to save pricing.' },
+          { status: 500 },
+        );
+      }
+    }
 
-interface MatcherInput {
-  ocrText: string;
-  rows: Array<{
-    vbli_id: string;
-    line: {
-      species?: string;
-      dimension?: string;
-      grade?: string | null;
-      length?: string | null;
-      quantity?: number;
-      unit?: string;
-    };
-  }>;
-}
+    // --- Re-read priced count authoritatively from the DB -----------------
+    const { data: pricedData, error: pricedError } = await admin
+      .from('vendor_bid_line_items')
+      .select('line_item_id, unit_price')
+      .eq('vendor_bid_id', vendorBid.id)
+      .not('unit_price', 'is', null);
+    if (pricedError) {
+      console.warn(
+        `LMBR.ai extract: priced count query failed: ${pricedError.message}`,
+      );
+      return NextResponse.json(
+        { error: 'Unable to finalize submission.' },
+        { status: 500 },
+      );
+    }
+    const pricedCount = (pricedData ?? []).length;
 
-interface MatcherMatch {
-  vbli_id: string;
-  unit_price: number | null;
-  note: string | null;
-}
-
-interface MatcherResult {
-  matches: MatcherMatch[];
-  haikuCostCents: number;
-}
-
-const PRICE_TOOL = {
-  name: 'match_vendor_prices',
-  description:
-    'Emit one result per known line item. unit_price is null when no confident match was found.',
-  input_schema: {
-    type: 'object' as const,
-    properties: {
-      matches: {
-        type: 'array',
-        items: {
-          type: 'object',
-          properties: {
-            vbli_id: { type: 'string' },
-            unit_price: { type: ['number', 'null'] },
-            note: { type: ['string', 'null'] },
-          },
-          required: ['vbli_id', 'unit_price', 'note'],
+    if (pricedCount === 0) {
+      // Same rule as /api/vendor-submit: a submit that produced zero
+      // priced rows is a data-quality lie. Leave the row untouched so
+      // the vendor can re-upload a cleaner scan.
+      return NextResponse.json(
+        {
+          error:
+            'Scan-back produced no matched prices — please verify the image is legible or use the web form.',
         },
-      },
-    },
-    required: ['matches'],
-  },
-};
+        { status: 400 },
+      );
+    }
 
-const PRICE_SYSTEM_PROMPT = `You are a vendor price-sheet matcher. You will receive:
-- A list of line items (with vbli_id, species, dimension, grade, length, quantity, unit) that a buyer sent to a vendor.
-- The OCR text of the vendor's filled-out / scanned price sheet.
+    const status: 'submitted' | 'partial' =
+      pricedCount >= expectedCount && expectedCount > 0 ? 'submitted' : 'partial';
 
-Your job: for each line item, find the unit price the vendor wrote next to it on their sheet. Return one match object per line item. Use null for unit_price if you can't find a confident match — do NOT guess. Include a short note ONLY when you have a useful caveat (e.g. "ambiguous — two possible prices", "annotated 'per MBF'"), otherwise return null.
+    const { error: statusError } = await admin
+      .from('vendor_bids')
+      .update({
+        status,
+        submitted_at: nowIso,
+        // Paper path — record the method for the vendor-status board and
+        // for downstream analytics. raw_response_url stays null; file
+        // retention lives in Prompt 08 integration.
+        submission_method: 'scan',
+      })
+      .eq('id', vendorBid.id);
+    if (statusError) {
+      console.warn(
+        `LMBR.ai extract: status update failed: ${statusError.message}`,
+      );
+      return NextResponse.json(
+        { error: 'Unable to finalize submission.' },
+        { status: 500 },
+      );
+    }
 
-Output only via the match_vendor_prices tool, one call, with matches.length equal to the number of line items supplied.`;
+    // --- Fire-and-forget cost ledger --------------------------------------
+    // Recorded as two rows so the manager dashboard can separate OCR spend
+    // from AI spend. The agent's costCents is Haiku; OCR is the Azure layer
+    // cost. Neither blocks the response — recordExtraction swallows errors.
+    void recordExtraction({
+      bidId: vendorBid.bid_id,
+      companyId: vendorBid.company_id,
+      method: 'ocr',
+      costCents: ocrCostCents,
+    });
+    if (scanResult.costCents > 0) {
+      void recordExtraction({
+        bidId: vendorBid.bid_id,
+        companyId: vendorBid.company_id,
+        method: 'qa_llm',
+        costCents: scanResult.costCents,
+      });
+    }
 
-async function matchPricesWithHaiku(input: MatcherInput): Promise<MatcherResult> {
-  if (input.rows.length === 0) {
-    return { matches: [], haikuCostCents: 0 };
+    const extractionCostCents =
+      Math.round((ocrCostCents + scanResult.costCents) * 10000) / 10000;
+
+    return NextResponse.json({
+      success: true,
+      status,
+      pricedCount,
+      expectedCount,
+      unmatchedLineItemIds: scanResult.unmatchedExpectedIds,
+      extractionCostCents,
+      ocrConfidence,
+      ocrPages,
+    });
+  } catch (err) {
+    console.warn(
+      `LMBR.ai extract: unexpected error: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return NextResponse.json(
+      { error: 'Extraction failed.' },
+      { status: 500 },
+    );
   }
-
-  const anthropic = getAnthropic();
-
-  const rowLines = input.rows.map((row, idx) => {
-    const line = row.line;
-    return `  ${idx + 1}. vbli_id=${row.vbli_id} — ${line.quantity ?? '?'} ${line.unit ?? ''} ${line.dimension ?? ''} ${line.species ?? ''} ${line.grade ?? ''} ${line.length ?? ''}`
-      .replace(/\s+/g, ' ')
-      .trim();
-  });
-
-  const userText = [
-    'Line items to price (in the order you must return them):',
-    ...rowLines,
-    '',
-    '--- vendor OCR text ---',
-    input.ocrText.slice(0, 8_000),
-    '--- end OCR text ---',
-  ].join('\n');
-
-  const response = await anthropic.messages.create({
-    model: QA_EXTRACT_MODEL,
-    max_tokens: 1024,
-    system: PRICE_SYSTEM_PROMPT,
-    tools: [PRICE_TOOL] as never,
-    tool_choice: { type: 'tool', name: PRICE_TOOL.name } as never,
-    messages: [{ role: 'user', content: userText }],
-  });
-
-  const usage = response.usage;
-  const haikuCostCents = usage
-    ? (usage.input_tokens / 1_000_000) * HAIKU_INPUT_CENTS_PER_MTOK +
-      (usage.output_tokens / 1_000_000) * HAIKU_OUTPUT_CENTS_PER_MTOK
-    : 0;
-
-  type ResponseBlock =
-    | { type: 'tool_use'; id: string; name: string; input: unknown }
-    | { type: 'text'; text: string }
-    | { type: string; [key: string]: unknown };
-
-  const blocks = (response.content ?? []) as ResponseBlock[];
-  const toolUse = blocks.find(
-    (b): b is Extract<ResponseBlock, { type: 'tool_use' }> =>
-      b.type === 'tool_use' && b.name === PRICE_TOOL.name,
-  );
-
-  if (!toolUse) {
-    return {
-      matches: input.rows.map((row) => ({
-        vbli_id: row.vbli_id,
-        unit_price: null,
-        note: null,
-      })),
-      haikuCostCents,
-    };
-  }
-
-  interface RawMatch {
-    vbli_id: string;
-    unit_price: number | null;
-    note: string | null;
-  }
-  const parsed = toolUse.input as { matches?: RawMatch[] };
-  const rawMatches = Array.isArray(parsed.matches) ? parsed.matches : [];
-
-  // Re-align to the request order so the UI can zip strictly by index.
-  const byId = new Map<string, RawMatch>();
-  for (const m of rawMatches) {
-    if (m && typeof m.vbli_id === 'string') byId.set(m.vbli_id, m);
-  }
-
-  const matches: MatcherMatch[] = input.rows.map((row) => {
-    const m = byId.get(row.vbli_id);
-    if (!m) return { vbli_id: row.vbli_id, unit_price: null, note: null };
-    const unitPrice =
-      typeof m.unit_price === 'number' && Number.isFinite(m.unit_price)
-        ? m.unit_price
-        : null;
-    const note =
-      typeof m.note === 'string' && m.note.trim().length > 0 ? m.note : null;
-    return { vbli_id: row.vbli_id, unit_price: unitPrice, note };
-  });
-
-  return { matches, haikuCostCents };
-}
-
-function round4(n: number): number {
-  return Math.round(n * 10000) / 10000;
 }

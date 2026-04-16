@@ -23,3 +23,4 @@ export * from './pricing-agent';
 export * from './comparison-agent';
 export * from './market-agent';
 export * from './consolidation-agent';
+export * from './scanback-agent';
