@@ -8,8 +8,9 @@
  *           special district) happens downstream in the quote API.
  * Inputs:   state code.
  * Outputs:  STATE_SALES_TAX map, CA_LUMBER_ASSESSMENT constant,
- *           getStateSalesTax (stub).
- * Agent/API: consumed by /api/quote and /api/budget-quote routes.
+ *           getStateSalesTax, getCaLumberAssessment.
+ * Agent/API: consumed by @lmbr/agents/pricing-agent, /api/margin and
+ *            /api/quote.
  * Imports:  none.
  *
  * LMBR.ai — Enterprise AI bid automation for wholesale lumber distributors.
@@ -43,17 +44,36 @@ export const STATE_SALES_TAX: Readonly<Record<string, number>> = Object.freeze({
 
 /**
  * Resolve the base state sales tax for a 2-letter state code.
- * Implementation stub — production path will layer in county / special
- * district rates from an address-aware tax service.
+ *
+ * Behavior:
+ *  - Whitespace is trimmed and the input is upper-cased before lookup so
+ *    callers can pass either canonical ("CA") or loose ("ca", " CA ") codes.
+ *  - Unknown or empty state codes resolve to 0 (quiet fallback) — NOT a
+ *    throw. The quote API surfaces `taxJurisdiction.state: null` in that
+ *    path so the UI can warn the trader without the whole request failing.
+ *  - Non-string / garbage input returns 0 defensively.
  */
-export function getStateSalesTax(_stateCode: string): number {
-  throw new Error('Not implemented');
+export function getStateSalesTax(stateCode: string): number {
+  if (typeof stateCode !== 'string') return 0;
+  const code = stateCode.trim().toUpperCase();
+  if (!code) return 0;
+  return STATE_SALES_TAX[code] ?? 0;
 }
 
 /**
- * Resolve the CA lumber assessment for a given line item total.
- * Implementation stub — exemption rules pending.
+ * Resolve the CA lumber assessment for a given line subtotal.
+ *
+ * Behavior:
+ *  - Non-finite / non-positive subtotals return 0 (no negative tax, no NaN).
+ *  - Result is rounded to cents so callers can add it to other currency
+ *    amounts without re-rounding.
+ *
+ * NOTE: This helper intentionally does NOT check the jobState — callers
+ * (pricing-agent, /api/quote) decide whether the CA assessment applies
+ * based on the bid's job_state. This keeps the helper side-effect-free
+ * and trivially testable.
  */
-export function getCaLumberAssessment(_lineSubtotal: number): number {
-  throw new Error('Not implemented');
+export function getCaLumberAssessment(lineSubtotal: number): number {
+  if (!Number.isFinite(lineSubtotal) || lineSubtotal <= 0) return 0;
+  return Math.round(lineSubtotal * CA_LUMBER_ASSESSMENT * 100) / 100;
 }
