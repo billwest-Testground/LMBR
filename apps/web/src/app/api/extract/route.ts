@@ -152,6 +152,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       );
     }
 
+    // Guard pre-body-read to prevent memory bombing. 25MB file × ~1.5x multipart overhead = 40MB ceiling.
+    const contentLengthHeader = req.headers.get('content-length');
+    if (contentLengthHeader) {
+      const declared = Number(contentLengthHeader);
+      if (Number.isFinite(declared) && declared > MAX_FILE_BYTES * 1.5) {
+        return NextResponse.json({ error: 'File is too large.' }, { status: 413 });
+      }
+    }
+
     // --- Parse form --------------------------------------------------------
     let form: FormData;
     try {
@@ -464,6 +473,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       costCents: ocrCostCents,
     });
     if (scanResult.costCents > 0) {
+      // TODO(prompt-08): add 'scanback_llm' to CostMethodSchema so this doesn't alias qa_llm
       void recordExtraction({
         bidId: vendorBid.bid_id,
         companyId: vendorBid.company_id,

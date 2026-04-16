@@ -152,7 +152,7 @@ export function ScanUpload({
     ? result.status === 'submitted'
       ? {
           tone: 'success' as const,
-          text: `All ${result.expectedCount} line${result.expectedCount === 1 ? '' : 's'} matched from your scan. The buyer has been notified.`,
+          text: `All ${result.expectedCount} line${result.expectedCount === 1 ? '' : 's'} matched from your scan. Pricing saved. The buyer will see it on their next dashboard refresh.`,
         }
       : {
           tone: 'warning' as const,

@@ -115,8 +115,11 @@ const PRICE_MAX = 100_000;
 /** Upper bound on notes length written to DB. Matches vendor-submit API. */
 const NOTES_MAX_LEN = 1000;
 
-/** Truncate the raw OCR text before sending — Haiku context is cheap but finite. */
-const OCR_TEXT_MAX_CHARS = 12_000;
+/**
+ * Truncate the raw OCR text before sending — Haiku 4.5 has 200k context;
+ * 40k preserves roughly 20–30 pages of hand-priced tallies without chunking.
+ */
+const OCR_TEXT_MAX_CHARS = 40_000;
 
 // -----------------------------------------------------------------------------
 // Prompt
@@ -136,10 +139,16 @@ Your job: match each expected line to a unit price on the sheet. For each expect
 - raw_snippet (the OCR fragment you read this price from, for debugging — or null if none)
 
 CRITICAL RULES:
+- The printed tally sheet has a left-most column labeled "#" with row numbers (1, 2, 3, …). Vendors write prices next to those numbers. When you can read a row number adjacent to a handwritten price, TRUST THE ROW NUMBER — use it to look up the expected line by index and match to its lineItemId. Do NOT re-interpret the row's species / dimension / grade when a row number is present.
+- Only fall back to species/dimension/grade matching when the row number is illegible, smudged, or missing entirely. In that case, note the degraded match in notes (e.g. "row# illegible — matched by dimension").
 - Lumber unit prices are almost always between ~$200–$2000 per MBF or a few dollars per PCS. Prices outside $0.01–$100,000 are nearly always OCR misreads — return null for unit_price in that case.
+- Strip currency symbols ($) and thousands separators (,) before parsing. Treat "$485", "485", and "485.00" as 485.
+- If a row has TWO prices (e.g., "$485 / $512" — vendor wrote an alt or corrected themselves), use the SECOND (later/rightmost) value as unit_price and put the first into notes (e.g. "also quoted 485").
+- Unit plausibility: if the row's unit is MBF, typical prices are $200–$2000; if PCS, typical prices are $0.50–$50. If the OCR'd value is wildly off for the row's unit (e.g., $4.85 on a MBF row), return null for unit_price and put the raw value in notes — ambiguity should surface, not guess.
+- For crossed-out values, use the NEW value (whatever isn't crossed out). If both are crossed out → null.
+- Digit ambiguity: 0/O, 1/l, 7/1 — prefer the reading that yields a plausible price for the row's unit.
 - If a row is crossed out, blank, or illegible, return null for unit_price. Do NOT guess.
 - If the vendor wrote a note (e.g. "no mill", "call me", "3-week lead"), capture it verbatim in notes.
-- Use the row ordering as a strong prior but not gospel — vendors sometimes re-order rows, skip lines, or squeeze in annotations. Prefer matching by dimension/species/quantity when there is disagreement.
 - Report any OCR rows that look like priced entries but don't map to any expected line in the extra_rows array — this is a sanity check for trader review, not grounds to invent a line_item_id.
 
 You MUST call the match_scanback_prices tool exactly once with matches covering every expected line_item_id supplied. Do NOT return text, commentary, or explanation — only the tool call.`;
