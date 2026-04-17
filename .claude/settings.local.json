@@ -57,7 +57,10 @@
       "Bash(./node_modules/.bin/tsx scripts/verify-pdf-render.ts)",
       "Bash(node -e \"require.resolve\\('tsx'\\); console.log\\('ok'\\)\")",
       "Bash(node -e ' *)",
-      "Bash(unset SESSION_COOKIE)"
+      "Bash(unset SESSION_COOKIE)",
+      "Bash(grep -E \"^\\\\.gstack\" .gitignore)",
+      "Bash(echo \"exit=$?\")",
+      "Bash(xargs -I {} wc -l {})"
     ]
   }
 }

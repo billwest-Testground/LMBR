@@ -189,6 +189,34 @@ lmbr-ai/                          ← root
 
 ---
 
+Available skills:
+  /office-hours     — problem definition before building
+  /autoplan         — plan before executing
+  /plan-eng-review  — engineering review gate
+  /review           — code review
+  /ship             — sync, test, push, open PR
+  /land-and-deploy  — merge, wait for CI, verify production
+  /qa               — post-deploy monitoring
+  /qa-only          — bug report without code changes
+  /cso              — security audit (OWASP + STRIDE)
+  /benchmark        — performance baseline
+  /learn            — surface codebase patterns
+  /retro            — weekly shipping retro
+  /investigate      — root cause analysis
+  /document-release — update docs after shipping
+  /careful          — high-risk change mode
+  /freeze           — lock the codebase
+  /guard            — protect critical paths
+  /canary           — staged rollout monitoring
+
+Run /cso before every major release.
+Run pnpm audit --prod before every deploy.
+Last /cso run: 2026-04-17 — one MEDIUM finding fixed
+(15e4ca2), no open findings.
+
+Commit as:
+  docs(claude): add gstack skills section + last cso date
+
 ## Tech Stack
 
 | Layer | Technology | Notes |
@@ -1050,3 +1078,13 @@ GC intelligence layer → after contractor platform proven
 SLM fine-tuning pipeline → when 50k corrections logged
 Pay app flow → future, after GC layer exists
 ERP integration → future, after OC approval proven]
+
+Add this section to CLAUDE.md near the bottom, before
+the "Before Every Claude Code Session" section:
+
+## gstack Skills (globally installed)
+
+gstack is installed globally at ~/.claude/skills/gstack.
+Use /browse for all web browsing — never use
+mcp__claude-in-chrome__* tools directly.
+
