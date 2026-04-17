@@ -40,7 +40,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
   { label: 'Bids', href: '/bids', icon: FileBarChart },
   { label: 'Vendors', href: '/vendors', icon: Building2 },
-  { label: 'Market', href: '/market', icon: LineChart },
+  { label: 'Market', href: '/dashboard/market', icon: LineChart },
   { label: 'Archive', href: '/archive', icon: Archive },
   { label: 'Settings', href: '/settings', icon: Settings },
 ];

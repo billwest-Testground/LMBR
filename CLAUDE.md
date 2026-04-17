@@ -726,7 +726,48 @@ Track progress here as modules are completed:
       `NEXT_PUBLIC_APP_URL` (must be HTTPS — ngrok URL for dev).
       Generate with:
       `node -e 'console.log(require("crypto").randomBytes(32).toString("hex"))'`
-- [ ] PROMPT 09 — Market intelligence layer
+- [x] PROMPT 09 — Market intelligence layer
+    - LMBR Cash Market Index built from aggregated vendor bids.
+      `public.market_price_snapshots` (migration 024) is append-only;
+      the daily aggregation job reads `vendor_bid_line_items` joined
+      through `vendor_bids` (status='submitted') to `bids`
+      (status != 'archived'), groups by slice, enforces the 3-buyer
+      anonymization floor, and upserts via `ON CONFLICT DO NOTHING`
+      so re-runs are no-ops.
+    - Anonymization floor is enforced at TWO layers:
+      (1) `CHECK (company_count >= 3)` on the DB column (migration 024),
+      (2) `ANONYMIZATION_FLOOR = 3` in `@lmbr/agents/market-agent`
+          (suppresses slices below the threshold before insert).
+      Defense-in-depth; a buggy writer cannot breach the floor.
+    - `companyCount` NEVER reaches a client. `GET /api/market`
+      strips it via `toPublic()` and derives a bucketed
+      `contributorNote` from `MIN(companyCount)` across results
+      (weakest-link rule): "10+ distributors" / "5+ distributors" /
+      "multiple distributors".
+    - Fallback cascade on `lookupMarketPrice`: exact →
+      region_any → grade_any → none. 30-day staleness cutoff
+      (`MAX_SNAPSHOT_AGE_DAYS`) — older snapshots return `none`,
+      not a stale price.
+    - No futures ticker in V1 — product scope cut (commit `04a9fe1`).
+      The Twelve Data integration and `market_futures` table were
+      removed. `TWELVEDATA_API_KEY` placeholder retained in
+      `.env.example` as "future premium feature — add when customers
+      request it."
+    - Cron targets (Prompt 11 wires the schedule):
+      - `POST /api/market/aggregate` (daily) — bearer-auth'd via
+        `MARKET_AGGREGATE_SECRET`. Never returns non-2xx except the
+        auth gate. Logs `slicesBelowFloor` at info level as the
+        Cash Index readiness signal.
+    - Budget estimate contract: `POST /api/market/budget-quote` is
+      **ephemeral** — never persisted. Role-gated to
+      trader / trader_buyer / manager / owner. The `warning` field
+      is **always** present in successful responses. Calling it a
+      "quote" in any user-facing string is a product violation —
+      see `packages/agents/src/market-agent.ts` file header.
+    - Tests: 19 vitest cases in `packages/agents/src/__tests__/market-agent.test.ts`
+      — floor, math, cascade, composition, idempotency. Plus
+      smoke-e2e Step 10 verifies the anonymization floor fires end-
+      to-end through the DB (1-company seed → 0 slices written).
 - [ ] PROMPT 10 — Archive + knowledge base
 - [ ] PROMPT 11 — Settings + company config
 - [ ] PROMPT 12 — Polish + QA pass
