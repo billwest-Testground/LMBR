@@ -1,0 +1,23 @@
+-- =============================================================================
+-- LMBR.ai migration 026 — drop market_futures (V1 scope cut)
+-- Built by Worklighter.
+--
+-- Lumber futures data requires a paid API subscription (Barchart
+-- commercial $500/month; Twelve Data free tier did not resolve the
+-- expected symbol reliably). Shipping a sentiment-only ticker is
+-- speculative work — we add it back when customers specifically ask
+-- for it, not speculatively for demo aesthetics.
+--
+-- Dropping the table rather than leaving it dormant: the type + code
+-- paths are already gone (TWELVEDATA_API_KEY / MARKET_REFRESH_SECRET /
+-- market-data.ts / /api/market/futures/refresh all removed in the same
+-- commit), so the DB object has no writers or readers and would only
+-- rot. A future re-introduction ships its own fresh migration with the
+-- right shape for whichever provider we choose.
+--
+-- Idempotent on purpose — IF EXISTS because early-adopter environments
+-- that already ran migration 025 need to shed the table, and fresh
+-- clones will never have had it.
+-- =============================================================================
+
+drop table if exists public.market_futures;

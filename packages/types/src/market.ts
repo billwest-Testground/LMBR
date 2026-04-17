@@ -42,18 +42,18 @@ import { z } from 'zod';
 // -----------------------------------------------------------------------------
 
 /**
- * Matches the `market_source` enum in supabase/migrations/010_market_prices.sql.
- *   - vendor_aggregated: rolled up from our own vendor bids (this is the
- *     Cash Index — the thing customers actually get priced against).
- *   - cme_futures: pulled from Barchart. Sentiment / direction only.
+ * Narrowed from the migration-010 enum after the V1 scope cut that
+ * removed the futures ticker (see commit history around migration 026).
+ *   - vendor_aggregated: rolled up from our own vendor bids — this is
+ *     the LMBR Cash Market Index, the thing quotes actually price
+ *     against.
  *   - manual: hand-entered override for a species we don't have vendor
  *     coverage on yet. Rare; used during onboarding.
+ * The legacy 'cme_futures' value is no longer written by any code path;
+ * leaving it in the DB enum is harmless (Postgres accepts the narrower
+ * set), and we avoid a risky ALTER TYPE migration for a dormant value.
  */
-export const MarketSourceSchema = z.enum([
-  'vendor_aggregated',
-  'cme_futures',
-  'manual',
-]);
+export const MarketSourceSchema = z.enum(['vendor_aggregated', 'manual']);
 export type MarketSource = z.infer<typeof MarketSourceSchema>;
 
 // -----------------------------------------------------------------------------
@@ -117,24 +117,6 @@ export const MarketPriceSnapshotSchema = z
     path: ['priceHigh'],
   });
 export type MarketPriceSnapshot = z.infer<typeof MarketPriceSnapshotSchema>;
-
-// -----------------------------------------------------------------------------
-// CME futures cache (migration 025)
-// -----------------------------------------------------------------------------
-
-export const MarketFuturesSchema = z.object({
-  id: z.string().uuid(),
-  symbol: z.string(),
-  contractMonth: z.string(),
-  lastPrice: z.number().nonnegative(),
-  priceChange: z.number().nullable(),
-  priceChangePct: z.number().nullable(),
-  openInterest: z.number().int().nonnegative().nullable(),
-  volume: z.number().int().nonnegative().nullable(),
-  fetchedAt: z.string().datetime(),
-  createdAt: z.string().datetime(),
-});
-export type MarketFutures = z.infer<typeof MarketFuturesSchema>;
 
 // -----------------------------------------------------------------------------
 // Budget quote output
