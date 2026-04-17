@@ -100,3 +100,58 @@ pnpm tsx scripts/smoke-e2e-http.ts
 ## CI integration (future)
 
 Both scripts exit 1 on failure, 0 on success. Option A can be wired into CI today (needs Supabase test project + service-role key as GitHub secret). Option B needs a pre-step that logs in a test user and exports the session cookie — doable via Playwright or a headless auth flow. Not wired yet.
+
+## Manual verification — Outlook webhook (Prompt 08 Step 2)
+
+No automated smoke yet. Graph subscriptions need a publicly reachable HTTPS URL and a live Microsoft 365 mailbox, neither of which we mock. Exercise once per prompt touching `apps/web/src/app/api/webhook/outlook` or `packages/lib/src/outlook.ts`.
+
+**Prerequisites:**
+
+- Dev server exposed at a public HTTPS URL (ngrok, Cloudflare Tunnel, or deployed preview).
+- A test Microsoft 365 mailbox for a user who has completed the `/settings/integrations` OAuth flow (Step 6 lands this page).
+- `.env.local` has: `MICROSOFT_*`, `OUTLOOK_TOKEN_ENCRYPTION_KEY`, `OUTLOOK_CLIENT_STATE_SECRET`, `NEXT_PUBLIC_APP_URL` (must match the tunneled HTTPS URL).
+
+**Steps:**
+
+1. Create a subscription:
+   ```ts
+   import { createSubscription } from '@lmbr/lib';
+   await createSubscription(USER_ID, COMPANY_ID, 'test-mailbox@your-tenant.onmicrosoft.com');
+   ```
+   Expect: a row in `public.outlook_subscriptions` with `status='active'` and `expiration_datetime` ~3 days out. Graph called your webhook with `?validationToken=...`; the creation only succeeds if the 200 text/plain handshake worked.
+
+2. Send a test email to that mailbox with a real lumber list attachment (PDF or XLSX). Use `bids@` convention if you've set it up; otherwise any To: address on the mailbox works.
+
+3. Within ~30 seconds, verify:
+   - A row appears in `public.bids` with `message_id` populated and `status` advancing through `'extracting'` → `'received'`.
+   - The attachment was uploaded to the `bids-raw` bucket (path: `{companyId}/{uuid}{.ext}`).
+   - An auto-reply landed in the sender's inbox, threaded off the original.
+
+4. Resend the same email (or have Graph redeliver the notification — can be forced by PATCHing `expirationDateTime` then waiting). Verify no duplicate bid is created; the logs show `[outlook] duplicate ignored`.
+
+5. Test the renewal endpoint:
+   ```
+   curl -X POST https://your-host/api/webhook/outlook/renew \
+     -H "Authorization: Bearer $OUTLOOK_RENEWAL_SECRET"
+   ```
+   Expect: `{ scanned, renewed, recreated, failed, errors }`. On an unauthenticated call expect 401 with body `{ "error": "Unauthorized" }` — no leak of whether the secret env var is even set.
+
+6. Tear down:
+   ```ts
+   import { getGraphClient } from '@lmbr/lib';
+   const client = await getGraphClient(USER_ID, COMPANY_ID);
+   await client.api(`/subscriptions/${SUBSCRIPTION_ID}`).delete();
+   // Then clean the DB row:
+   // DELETE FROM outlook_subscriptions WHERE subscription_id = '...';
+   ```
+
+**What to look for in logs:**
+
+| Message | Meaning |
+|---|---|
+| `outlook webhook: unknown subscriptionId=...` | Subscription row missing — cleanup ran out of order, or the webhook was called for a sub we never registered. |
+| `outlook webhook: clientState mismatch for subscriptionId=...` | Someone POSTed without the per-sub secret. Treat as an attempted forgery. |
+| `[outlook] duplicate ignored: company=... message=...` | Idempotency worked. Graph redelivered and we correctly skipped. |
+| `[outlook] skipping attachment '...' with unsupported type=...` | Attachment MIME not in the SUPPORTED_MIME_TYPES allowlist. Expected for email signatures, inline images. |
+| `outlook webhook background: ...` | Background bid creation failed after the 202 returned. Surface in ops dashboards — these are silent otherwise. |
+| `outlook.createSubscription: row insert failed after Graph create — subscription ... leaked` | Graph has the subscription but our DB doesn't. Manually `DELETE /subscriptions/{id}` at Graph. |
