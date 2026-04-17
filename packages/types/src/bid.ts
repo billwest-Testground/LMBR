@@ -75,6 +75,11 @@ export const BidSchema = z.object({
   consolidationMode: ConsolidationModeSchema.default('structured'),
   rawFileUrl: z.string().url().nullable().optional(),
   notes: z.string().nullable().optional(),
+  // Archive lifecycle (migration 027). NULL = active. archivedAt is
+  // the single source of truth for the archive / active filter — the
+  // legacy `'archived'` BidStatus value is dormant.
+  archivedAt: z.string().datetime().nullable().optional(),
+  archivedBy: z.string().uuid().nullable().optional(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });
