@@ -122,6 +122,26 @@ export type MarketPriceSnapshot = z.infer<typeof MarketPriceSnapshotSchema>;
 // Budget quote output
 // -----------------------------------------------------------------------------
 
+/**
+ * Which level of the fallback cascade priced this line:
+ *   - exact:      species + dimension + grade + region all matched.
+ *   - region_any: same species/dimension/grade, any region.
+ *   - grade_any:  same species/dimension, any grade / any region.
+ *
+ * Shown in the UI so the trader reads their confidence in the estimate.
+ * Exact is a tight signal; grade_any is "this is the best we have, treat
+ * as directional." `none` is never a priced line — those land in
+ * unpricedLines[] instead.
+ */
+export const BudgetQuoteFallbackLevelSchema = z.enum([
+  'exact',
+  'region_any',
+  'grade_any',
+]);
+export type BudgetQuoteFallbackLevel = z.infer<
+  typeof BudgetQuoteFallbackLevelSchema
+>;
+
 export const BudgetQuoteLineSchema = z.object({
   commodityId: z.string(),
   quantity: z.number().positive(),
@@ -131,6 +151,8 @@ export const BudgetQuoteLineSchema = z.object({
   extendedSellPrice: z.number().nonnegative(),
   /** "How thin is the signal behind this line?" — null = no snapshot. */
   companyCount: z.number().int().nullable(),
+  /** Which level of the cascade produced this price. */
+  fallbackLevel: BudgetQuoteFallbackLevelSchema,
 });
 export type BudgetQuoteLine = z.infer<typeof BudgetQuoteLineSchema>;
 
