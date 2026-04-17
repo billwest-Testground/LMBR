@@ -740,3 +740,313 @@ None of these are in the ingest code path.
 
 *LMBR.ai — Powered by Worklighter*
 *lmbr.ai | worklighter.ai*
+
+[Prompt 13 — Contractor Platform (Planned, Not Built Yet)
+Do not build any of this during Prompts 08–12.
+This section exists so the decisions made on April 16, 2026
+are not lost. When Prompt 12 polish is complete, Prompt 13
+is the next build target.
+What It Is
+A contractor-facing version of LMBR for framing contractors.
+Same look, same UX, inverted workflow. Contractors upload
+lists and receive quotes from brokers. Brokers upload lists
+and receive quotes from mills. The comparison matrix is
+identical — just comparing broker quotes instead of mill quotes.
+Why It Exists
+
+Contractors are already sending Excel files to multiple
+brokers manually. LMBR gives them one upload point.
+Locked list integrity — once a contractor uploads a list,
+it is immutable. Every broker receives the identical list.
+Prevents list manipulation (short-listing, item substitution)
+which is a documented industry problem.
+Single extraction for multiple vendors. If 5 brokers bid
+the same job, LMBR extracts the list once. Cost is shared,
+not multiplied per broker.
+Feeds the broker sales motion. When a broker's customer
+is already on LMBR, onboarding starts from "your customers
+are already there" not "let me explain what this does."
+
+Data Model Decision
+Extend the bids table — do not create a separate table.
+Add: source enum ('broker' | 'contractor')
+Add: locked_at timestamptz (immutable after this point)
+The entire extraction pipeline, routing, and comparison
+matrix work without modification. Contractor workflow is
+a different entry and exit point to the same core data.
+Three Workflow Documents to Write Before Building
+
+Contractor bid flow (upload → lock → broker receives → quote back)
+Order change flow (text / photo / PDF / voice → send → audit)
+Broker receiving contractor list (confirm no new UX needed)
+
+
+Freemium Model — Contractor Pricing (Decided April 16)
+Pricing Decision
+First 500 contractors: free forever (founding cohort)
+Everyone after: $149/month
+Not $99 — $149. Still cheap for a contractor doing $5M+/year.
+At 1,500 paying contractors: $2.7M ARR from a non-focus tier.
+Acquisition Sequence
+
+Source top 2,000 framing contractors from Procore's
+network page (self-selected, digitally engaged, more
+likely to adopt new tools)
+Scrape and verify: active company, right volume,
+decision maker email reachable
+Email campaign — first 500 to sign up get free forever
+Social proof target: 500 users before pushing hard on
+broker sales. "500 framing contractors already use LMBR
+to send bid requests" changes the Matheus conversation.
+
+Pricing Objection Pre-Answer
+When a broker asks why contractors pay $149 and they pay
+$10,000+, the answer:
+"Different products, different value, different volume.
+Contractors use a convenience tool — one upload, quotes
+back, comparison view. You're running a trading platform.
+Your traders use this all day across hundreds of bids.
+The market intelligence layer alone — the cash market
+index built from your transaction data — is something
+Random Lengths charges more than we do for a fraction
+of the accuracy. The contractor tool is a feeder system
+that brings more bids to your desk. You're not paying
+for their access. You're paying for yours."
+
+Quality of Life Features (Decided April 16, Build in Prompt 12 or 13)
+Extraction Verification Panel
+Contractors will be skeptical at first that AI captured
+everything correctly. Add a collapsible verification bar
+at the top of the extracted list view:
+Source file: bid-framing-lot-23.xlsx    ↓ View original
+Lines in source:     247
+Lines extracted:     247    ✓ 100% captured
+Total board feet:    84,320 BF
+Total sheet goods:   1,240 MSF
+Buildings detected:  4
+⚠ 3 items flagged for review
+✓ Board foot math verified on all 244 clean lines
+Rules:
+
+Excel: always show line count match (row count minus headers)
+PDF text: show lines with lumber-like patterns matched
+Scanned: don't over-promise — show only what can be proven
+Original file always downloadable (already stored in Supabase)
+
+Global Vendor Directory
+A curated LMBR directory of every known mill, wholesale
+lumber yard, retail yard, and broker. Logos as visual
+identifiers. "No affiliation" badge on every entry.
+At onboarding:
+"Do you have a vendor list to import?"
+YES → upload CSV/Excel → extract and match against directory
+NO → browse directory, check vendors, add contact info
+Source from Procore network for the contractor-side directory
+(lumber brokers who contractors buy through).
+Legal note: "No affiliation" disclaimer in UI and terms.
+Not endorsing vendors. Not receiving referral fees.
+Directory is a utility, not a marketplace.
+Archive Feature — Add in Prompt 12
+Bid states:
+active   — live, in progress, or completed
+archived — removed from main view, all data preserved
+deleted  — soft delete only, retained for audit
+Archive behavior:
+bids.archived_at + bids.archived_by set
+All data preserved: line items, vendor bids, quotes,
+costs, audit logs, source file
+Searchable in "Archived" tab
+"Bid multiple times" filter for delayed jobs
+Reactivation:
+Clears archived_at
+All history intact
+Prompt: "Continue where you left off or start fresh?"
+Migration to add in Prompt 12:
+ALTER TABLE bids
+ADD COLUMN archived_at timestamptz DEFAULT NULL,
+ADD COLUMN archived_by uuid REFERENCES users(id);
+CREATE INDEX idx_bids_archived ON bids(company_id, archived_at)
+WHERE archived_at IS NOT NULL;
+
+Voice-to-Order-Change + Audit Trail (Prompt 13)
+Feature Description
+PM on jobsite opens app → Order Change → Voice
+→ Records → Transcribes → PM reviews → Selects vendors → Send
+Audit Log Entry (immutable, permanent)
+Every order change request writes an immutable log entry:
+Submitted by: Jose Martinez
+Role: Project Manager
+Date/Time: April 16, 2026 at 3:02 PM PST
+Method: Voice recording (transcribed)
+Job: Lot 23
+Sent to: Pacific Coast Lumber, Idaho Pacific
+Voice transcript: [full text]
+Extracted line items: [structured]
+Audio recording: retained 90 days
+Email delivery: confirmed timestamp
+Read receipt: vendor + timestamp (via Outlook Graph API)
+Read receipts: wire up when Prompt 08 Outlook integration ships.
+Material OC Approval (Design Now, Activate with ERP)
+Approval flow exists in V1. ERP link deferred.
+Design the data model now so historical records exist
+when ERP integration ships.
+Approval record (immutable):
+OC Request: voice, 3:02 PM
+Quote received: 3:45 PM
+Approved: 4:15 PM by Jose Martinez
+Delta from contract: +$3,840
+Cumulative OC spend on job: $47,220
+Cumulative OC spend view: one tap answer to
+"how much have we gone over on lumber for this job?"
+
+"7% Light" Predictive Recommendation (Post-Prompt 13)
+After enough contractor historical data exists:
+"On your last 5 multifamily jobs you ran 7.2% over on
+dimensional framing lumber on average. On this bid of
+84,320 BF — consider adding 6,070 BF buffer if budget
+allows. That's approximately $2,540 at current market rates."
+"At current market rates" is powered by the LMBR Cash Market
+Index from the broker side. Broker transaction data makes
+the contractor recommendation smarter. Contractor overage
+data makes the broker market picture richer. They compound.
+Data required per job:
+Original bid quantities
+Order change quantities accumulated
+Final order quantity
+Variance: (final - bid) / bid = overage %
+Ship when enough historical data exists to make it meaningful.
+
+SLM / AI Independence Strategy (Decided April 16)
+Four Modes — All Already In Motion
+Mode 1 — Don't rely solely on AI (already done)
+Tiered extraction: 85%+ of documents never touch LLM.
+Deterministic parser is reliable, free, and immune to
+model pricing changes. Built this way deliberately.
+Mode 2 — New models make product better and cheaper
+Historical trajectory favors us. Haiku today is better
+than GPT-4 two years ago at a fraction of the cost.
+Volume growth + price decline = improving economics.
+Mode 3 — Fine-tuned SLM on our own data (6-12 months out)
+Open source candidates: Llama 3.1 8B, Mistral 7B, Phi-3
+Fine-tune cost: ~$50-200 on Lambda Labs or RunPod
+Inference cost at 10k bids/month: under $20
+Timeline: need ~50,000 labeled extraction examples
+Source: audit logs + correction_logs table (see below)
+Mode 4 — Open source RAG path available today
+Mistral 7B + Ollama + RAG pointing at audit logs
+No fine-tuning needed. Essentially free.
+Deployable as fallback if model pricing becomes a problem.
+correction_logs Table — Add in Prompt 12
+Every time a trader edits an AI-extracted line item,
+that correction is a labeled training example.
+This table is the future fine-tuning dataset.
+Build it from day one so data accumulates automatically.
+correction_logs:
+id uuid pk
+extraction_id uuid fk
+bid_id uuid fk
+company_id uuid fk
+original_extraction jsonb
+corrected_extraction jsonb
+correction_delta jsonb
+corrected_by uuid fk → users
+corrected_at timestamptz
+Wire into the line item edit flow in Prompt 12:
+whenever a trader saves an edit to an extracted line item,
+write a correction_log row automatically.
+
+The Four-Layer Data Vision (Long Game)
+Every product decision should make the data richer,
+not just the feature more complete.
+Layer 1 — Cash market intelligence (building now)
+Real vendor transaction prices from broker bids
+More accurate than Random Lengths for cash market
+Compounds with every broker customer added
+Layer 2 — Contractor bid intelligence (Prompt 13)
+Contracted material costs per job
+Order change accumulation per job
+Overage patterns per contractor
+Layer 3 — GC project intelligence (future)
+Budget vs. actual across material categories
+Subcontractor performance
+Pay app flow: sub → GC → owner
+Layer 4 — Multifamily market picture (endgame)
+How money flows on jobsites across the country
+Budget formation → procurement → OCs → pay apps → closeout
+Nobody has this picture. LMBR will.
+Procore Integration Target
+Developer portal → Marketplace → 1M+ user distribution
+Read-only first (pull project data in, don't write back yet)
+"Procore integration available" changes enterprise sales
+conversations before the technical integration is deep.
+Source contractor and GC acquisition lists from their
+network page before formal integration exists.
+
+Vertical Expansion Model (Long Game)
+Playbook per vertical:
+
+Find the domain expert
+Expert maps key players, workflows, pain points
+Expert designs extraction logic + normalization rules
+LMBR platform handles everything else
+Launch with expert's network as first customers
+
+Lumber → current build (founder is the expert)
+Concrete → find the concrete distribution expert
+Steel → find the steel distribution expert
+Drywall / MEP → same pattern
+Platform infrastructure is vertical-agnostic.
+Domain knowledge is what each expert brings.
+Each vertical gets its own Worklighter-stamp brand mark,
+its own domain (.ai), its own product name.
+
+Product Philosophy — Automation Suggests, Humans Decide
+Every automated action in LMBR has a manual override path.
+The system is opinionated about what it thinks is correct
+but never removes the human's ability to change it.
+This is non-negotiable in construction where relationships,
+local knowledge, and experience often override pure
+optimization. Build every feature with this in mind:
+AI extracts list → human can edit any line item
+System routes to buyer → human can reassign manually
+Mode recommended → human chooses consolidation mode
+Select all cheapest → human can override per line
+Margin presets applied → human can edit per line
+Approval gate fires → manager can override threshold
+Voice transcribes → PM reviews and edits before sending
+7% light flagged → contractor decides whether to buffer
+The goal is to eliminate tedious work, not judgment.
+Joe Miller typing out his change orders by email is fine.
+His broker does not have to use LMBR. But if the broker
+is on LMBR, the broker benefits regardless of whether
+their customer changes behavior. That is the right
+adoption model — the tool pays for itself at the broker
+level without requiring the contractor to change anything.
+
+Prompt 12 Additions Checklist (Before Starting Prompt 12)
+Add these items to the Prompt 12 build in addition to
+the original polish spec:
+[ ] Archive migration (bids.archived_at + archived_by)
+[ ] Archive UI (archived tab, reactivation flow)
+[ ] correction_logs table + write on every line item edit
+[ ] Extraction verification bar (bid review screen)
+[ ] BidLinesView extraction method badge column
+(currently reads from legacy notes blob — use new columns)
+[ ] Issue #6 — abbreviated group headers (H1 etc.)
+[ ] Pre-existing apps/web errors (lucide/typedRoutes)
+[ ] Mobile: NativeWind className errors, tailwind types
+[ ] Mobile: bid detail consolidation mode badge + selector
+[ ] Mobile: full comparison view (if not deferred further)
+
+What Is NOT Being Built in Prompts 08–12
+Logged here so it doesn't accidentally creep into scope:
+Contractor platform → Prompt 13
+Voice-to-text order change → Prompt 13
+Global vendor directory → Prompt 13
+Order change approval flow → Prompt 13
+Procore integration → after contractor platform exists
+GC intelligence layer → after contractor platform proven
+"7% light" recommendation → after Prompt 13 + data exists
+SLM fine-tuning pipeline → when 50k corrections logged
+Pay app flow → future, after GC layer exists
+ERP integration → future, after OC approval proven]
