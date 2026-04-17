@@ -32,6 +32,16 @@ import {
   BidLinesView,
   type BidLinesRow,
 } from '../../../components/bids/bid-lines-view';
+import {
+  ArchiveActionButton,
+  ArchivedBanner,
+} from '../../../components/bids/archive-actions';
+
+const ARCHIVE_PRIVILEGED_ROLES = new Set([
+  'trader_buyer',
+  'manager',
+  'owner',
+]);
 
 export const dynamic = 'force-dynamic';
 
@@ -50,11 +60,28 @@ export default async function BidDetailPage({ params }: PageProps) {
   const { data: bid } = await supabase
     .from('bids')
     .select(
-      'id, customer_name, customer_email, job_name, job_address, job_state, job_region, status, due_date, raw_file_url, created_at, updated_at',
+      'id, customer_name, customer_email, job_name, job_address, job_state, job_region, status, due_date, raw_file_url, created_at, updated_at, archived_at, archived_by, assigned_trader_id, created_by',
     )
     .eq('id', params.bidId)
     .maybeSingle();
   if (!bid) notFound();
+
+  // Role gate for the archive / reactivate actions. Mirrors the
+  // in-code gate on /api/bids/[bidId]/archive + /reactivate so the
+  // UI hides actions the server would reject.
+  const { data: roleRows } = await supabase
+    .from('roles')
+    .select('role_type')
+    .eq('user_id', session.user.id);
+  const callerRoles = (roleRows ?? []).map((r) => r.role_type as string);
+  const isPrivileged = callerRoles.some((r) =>
+    ARCHIVE_PRIVILEGED_ROLES.has(r),
+  );
+  const isTraderOnBid =
+    callerRoles.includes('trader') &&
+    (bid.assigned_trader_id === session.user.id ||
+      bid.created_by === session.user.id);
+  const canArchive = isPrivileged || isTraderOnBid;
 
   const { data: lineItems } = await supabase
     .from('line_items')
@@ -84,8 +111,18 @@ export default async function BidDetailPage({ params }: PageProps) {
     rows.map((r) => `${r.building_tag ?? ''}::${r.phase_number ?? ''}`),
   ).size;
 
+  const bidLabel = (bid.job_name as string | null) ?? bid.customer_name;
+
   return (
     <div className="flex flex-col gap-6">
+      {bid.archived_at ? (
+        <ArchivedBanner
+          bidId={bid.id}
+          bidLabel={bidLabel}
+          archivedAt={bid.archived_at as string}
+          canReactivate={canArchive}
+        />
+      ) : null}
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
           <Link
@@ -112,7 +149,7 @@ export default async function BidDetailPage({ params }: PageProps) {
             )}
           </div>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
           {bid.raw_file_url && (
             <Button asChild variant="secondary">
               <a href={bid.raw_file_url} target="_blank" rel="noreferrer">
@@ -129,6 +166,9 @@ export default async function BidDetailPage({ params }: PageProps) {
               </Link>
             </Button>
           )}
+          {!bid.archived_at && canArchive ? (
+            <ArchiveActionButton bidId={bid.id} />
+          ) : null}
         </div>
       </header>
 
