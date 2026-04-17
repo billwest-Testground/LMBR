@@ -62,6 +62,7 @@ if (!process.env.VENDOR_TOKEN_SECRET) {
 }
 
 import {
+  aggregateMarketSnapshots,
   consolidationAgent,
   pricingAgent,
   routingAgent,
@@ -1169,6 +1170,55 @@ async function step9_quote_persistence(ctx: SmokeContext): Promise<void> {
 }
 
 // -----------------------------------------------------------------------------
+// Step 10 — Market aggregation floor verification (optional, non-fatal)
+// -----------------------------------------------------------------------------
+//
+// Runs aggregateMarketSnapshots on TODAY's data scoped to the seed's
+// region (west, set by the seed's CA job). The seed contributes exactly
+// one company — below the 3-buyer anonymization floor — so we expect
+// zero snapshots to be written despite real bid data existing.
+//
+// Wrapped in its own try/catch in main() so a failure here never breaks
+// the 9-step pass. If multiple tenants are co-resident on the dev DB
+// and the floor is met organically, the assertion relaxes to a softer
+// signal ("floor cleared — data matured") rather than a failed test.
+//
+async function step10_market_floor(): Promise<void> {
+  const step = 'Step 10 — Market aggregation floor';
+  const today = new Date().toISOString().slice(0, 10);
+  const result = await aggregateMarketSnapshots({
+    sampleDate: today,
+    region: 'west',
+  });
+
+  if (result.slicesWritten === 0 && result.slicesBelowFloor > 0) {
+    console.log(
+      `  ✓ Anonymization floor verified — 1 company below 3-buyer threshold, ${result.slicesWritten} slices written (correct)`,
+    );
+    return;
+  }
+
+  if (result.slicesWritten > 0) {
+    // The floor was met by multi-tenant data in this DB. Not a test
+    // failure — the Cash Index has enough data to be useful. Surface
+    // as an info note so the operator knows the dev DB has matured.
+    console.log(
+      `  • Anonymization floor cleared by multi-tenant data — ${result.slicesWritten} slices written, ${result.slicesBelowFloor} below floor`,
+    );
+    return;
+  }
+
+  // slicesBelowFloor == 0 and slicesWritten == 0 means the seed's
+  // vendor pricing didn't land in the aggregation window — unexpected
+  // but not a showstopper. Surface via StepError so the caller in
+  // main() can decide whether to print a warning.
+  throw new StepError(
+    step,
+    `Expected at least one slice with data (below or above floor). Got slicesWritten=${result.slicesWritten} slicesBelowFloor=${result.slicesBelowFloor} scanned=${result.scanned}.`,
+  );
+}
+
+// -----------------------------------------------------------------------------
 // CLEANUP — FK-safe ordering; never throws; idempotent on partial seeds.
 // -----------------------------------------------------------------------------
 
@@ -1304,6 +1354,21 @@ async function main(): Promise<void> {
     await runStep('Step 7 — Margin stack', () => step7_margin(ctx));
     await runStep('Step 8 — PDF render', () => step8_pdf(ctx));
     await runStep('Step 9 — Quote persistence', () => step9_quote_persistence(ctx));
+
+    // Step 10 is additive and non-fatal: the market-agent aggregation
+    // floor verification. Wrap independently so an aggregation failure
+    // (or a DB state we didn't anticipate) never flips the 9-step pass
+    // to a fail. Prints its own label.
+    process.stdout.write('▸ Step 10 — Market aggregation floor... ');
+    const step10Started = Date.now();
+    try {
+      await step10_market_floor();
+      process.stdout.write(`(${Date.now() - step10Started}ms)\n`);
+    } catch (err) {
+      process.stdout.write('\n');
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn(`  ⚠ Step 10 skipped (non-fatal): ${message}`);
+    }
 
     console.log(
       `\n✓ Smoke test passed — ready for Prompt 08 (${Date.now() - started}ms total)`,

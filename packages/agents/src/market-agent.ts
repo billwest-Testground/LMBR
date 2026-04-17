@@ -179,7 +179,10 @@ export function buildSnapshots(
   }
 
   const out: SnapshotInsert[] = [];
-  for (const [, slice] of groups) {
+  // Array.from(…) rather than `for (const [, slice] of groups)` so the
+  // code targets any ES target without downlevelIteration — the smoke
+  // harness invokes this outside the agents package's own tsconfig.
+  for (const slice of Array.from(groups.values())) {
     const companies = new Set(slice.map((r) => r.companyId));
     if (companies.size < ANONYMIZATION_FLOOR) continue;
 
