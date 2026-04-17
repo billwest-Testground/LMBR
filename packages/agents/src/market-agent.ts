@@ -460,7 +460,11 @@ export async function aggregateMarketSnapshots(
     .eq('vendor_bids.status', 'submitted')
     .gte('vendor_bids.submitted_at', dayStart)
     .lt('vendor_bids.submitted_at', dayEnd)
-    .neq('vendor_bids.bids.status', 'archived')
+    // archived_at IS NULL is the single source of truth for "active"
+    // bids (migration 027). Legacy status='archived' is dormant.
+    // Nested filter via .filter() because PostgREST's .is() helper
+    // doesn't accept a dotted path; .filter(path, 'is', null) does.
+    .filter('vendor_bids.bids.archived_at', 'is', null)
     .not('unit_price', 'is', null);
 
   if (args.region) {

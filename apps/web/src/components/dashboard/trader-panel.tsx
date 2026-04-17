@@ -51,6 +51,7 @@ interface FetchedBid {
   due_date: string | null;
   created_at: string;
   updated_at: string;
+  archived_at: string | null;
 }
 
 interface StatBuckets {
@@ -77,7 +78,10 @@ function bucketStats(bids: FetchedBid[]): StatBuckets {
   let quotesSentMtd = 0;
 
   for (const bid of bids) {
-    if (bid.status !== 'sent' && bid.status !== 'archived') {
+    // Archive lifecycle is now a separate axis from workflow status —
+    // the dedicated archived_at column is the source of truth (see
+    // migration 027). Legacy status='archived' is dormant.
+    if (bid.status !== 'sent' && !bid.archived_at) {
       activeBids += 1;
     }
     if (bid.due_date) {
@@ -106,8 +110,9 @@ export function TraderPanel({ compact = false }: TraderPanelProps) {
       const { data, error: qErr } = await supabase
         .from('bids')
         .select(
-          'id, customer_name, job_name, status, due_date, created_at, updated_at',
+          'id, customer_name, job_name, status, due_date, created_at, updated_at, archived_at',
         )
+        .is('archived_at', null)
         .order('created_at', { ascending: false })
         .limit(100);
       if (qErr) throw qErr;

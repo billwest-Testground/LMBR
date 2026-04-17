@@ -667,7 +667,9 @@ function BudgetEstimatePanel() {
       const { data, error: queryError } = await supabase
         .from('bids')
         .select('id, customer_name, job_name, created_at, status')
-        .neq('status', 'archived')
+        // archived_at IS NULL is the single source of truth for "active"
+        // bids — migration 027. Legacy status='archived' is dormant.
+        .is('archived_at', null)
         .order('created_at', { ascending: false })
         .limit(50);
       if (queryError) {
