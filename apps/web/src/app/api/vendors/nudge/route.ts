@@ -160,6 +160,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const hoursRemaining = hoursBetween(Date.now(), dueByMs);
     const formUrl = buildSubmitUrl(vendorBid.token as string);
 
+    // Per-company subject override (migration 023).
+    const { data: companyRow } = await admin
+      .from('companies')
+      .select('nudge_email_subject')
+      .eq('id', profile.company_id)
+      .maybeSingle();
+    const subjectOverride =
+      (companyRow?.nudge_email_subject as string | null) ?? null;
+
     const result = await sendVendorNudge(profile.id, profile.company_id, {
       vendor: { name: vendor.name as string, email: vendor.email as string },
       bid: {
@@ -171,6 +180,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       },
       hoursRemaining,
       formUrl,
+      subjectOverride,
     });
 
     if (!result.success) {

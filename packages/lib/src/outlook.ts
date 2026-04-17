@@ -674,6 +674,12 @@ export interface SendDispatchToVendorParams {
   formUrl: string;
   pdfBuffer?: Buffer;
   pdfFilename?: string;
+  /**
+   * Per-company subject override from companies.dispatch_email_subject
+   * (migration 023). When provided, wins over the default subject line
+   * built from job/dueby. No placeholder interpolation today.
+   */
+  subjectOverride?: string | null;
 }
 
 export async function sendDispatchToVendor(
@@ -683,7 +689,11 @@ export async function sendDispatchToVendor(
 ): Promise<OutlookMailResult> {
   const job = params.bid.jobName ?? params.bid.customerName ?? 'RFQ';
   const dueLabel = formatDueByForEmail(params.bid.dueByIso);
-  const subject = `Lumber bid request — ${job} — due ${dueLabel}`;
+  const defaultSubject = `Lumber bid request — ${job} — due ${dueLabel}`;
+  const subject =
+    params.subjectOverride && params.subjectOverride.trim().length > 0
+      ? params.subjectOverride
+      : defaultSubject;
 
   const lines: string[] = [
     `<p>Hi ${escapeHtml(params.vendor.name)},</p>`,
@@ -729,6 +739,8 @@ export interface SendVendorNudgeParams {
   bid: { jobName: string | null; customerName: string | null; dueByIso: string };
   hoursRemaining: number;
   formUrl: string;
+  /** Override from companies.nudge_email_subject. Null = default. */
+  subjectOverride?: string | null;
 }
 
 export async function sendVendorNudge(
@@ -738,7 +750,11 @@ export async function sendVendorNudge(
 ): Promise<OutlookMailResult> {
   const job = params.bid.jobName ?? params.bid.customerName ?? 'RFQ';
   const hrs = Math.max(0, Math.round(params.hoursRemaining));
-  const subject = `Following up — ${job} bid due in ${hrs} hour${hrs === 1 ? '' : 's'}`;
+  const defaultSubject = `Following up — ${job} bid due in ${hrs} hour${hrs === 1 ? '' : 's'}`;
+  const subject =
+    params.subjectOverride && params.subjectOverride.trim().length > 0
+      ? params.subjectOverride
+      : defaultSubject;
   const body =
     `<p>Hi ${escapeHtml(params.vendor.name)},</p>` +
     `<p>Checking in on the <strong>${escapeHtml(job)}</strong> bid — we're looking to close pricing in ${hrs} hour${hrs === 1 ? '' : 's'}.</p>` +
@@ -766,6 +782,8 @@ export interface SendQuoteToCustomerParams {
   pdfFilename: string;
   ccCurrentUser?: boolean;
   ccEmail?: string;
+  /** Override from companies.quote_email_subject. Null = default. */
+  subjectOverride?: string | null;
 }
 
 export async function sendQuoteToCustomer(
@@ -777,7 +795,11 @@ export async function sendQuoteToCustomer(
   const validThrough = params.quote.validUntilIso
     ? ` — valid until ${formatDueByForEmail(params.quote.validUntilIso)}`
     : '';
-  const subject = `Quote for ${job}${validThrough}`;
+  const defaultSubject = `Quote for ${job}${validThrough}`;
+  const subject =
+    params.subjectOverride && params.subjectOverride.trim().length > 0
+      ? params.subjectOverride
+      : defaultSubject;
   const body =
     `<p>Hi${params.customer.name ? ` ${escapeHtml(params.customer.name)}` : ''},</p>` +
     `<p>Attached is quote <strong>#${escapeHtml(String(params.quote.quoteNumber))}</strong> for <strong>${escapeHtml(job)}</strong>.</p>` +

@@ -224,6 +224,16 @@ export async function POST(
     // the column exists. Fall back to the quote id's first 8 chars.
     const quoteNumberLabel = String(quote.id).slice(0, 8);
 
+    // Per-company subject override (migration 023).
+    const admin = getSupabaseAdmin();
+    const { data: companyRow } = await admin
+      .from('companies')
+      .select('quote_email_subject')
+      .eq('id', profile.company_id)
+      .maybeSingle();
+    const subjectOverride =
+      (companyRow?.quote_email_subject as string | null) ?? null;
+
     // --- Send ----------------------------------------------------------
     const emailResult = await sendQuoteToCustomer(
       profile.id,
@@ -240,6 +250,7 @@ export async function POST(
         },
         pdfBuffer,
         pdfFilename: `Quote-${quoteNumberLabel}.pdf`,
+        subjectOverride,
       },
     );
 
@@ -258,10 +269,10 @@ export async function POST(
     // --- Status advance: approved → sent -------------------------------
     // RLS on quotes restricts 'sent' writes to managers/owners per
     // migration 008. Since traders can legitimately send, we use the
-    // service-role admin client here. The manual role + tenant checks
-    // above (SEND_ROLES + company_id match at lines 101-131) are the
-    // only gates — mirrors the pattern in /api/manager/approvals.
-    const admin = getSupabaseAdmin();
+    // service-role admin client here (already declared above for the
+    // subject-override lookup). The manual role + tenant checks above
+    // (SEND_ROLES + company_id match) are the only gates — mirrors
+    // the pattern in /api/manager/approvals.
     const sentAtIso = new Date().toISOString();
     const { error: updateError } = await admin
       .from('quotes')

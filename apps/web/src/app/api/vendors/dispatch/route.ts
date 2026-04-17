@@ -174,6 +174,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       .eq('bid_id', bidId)
       .eq('company_id', profile.company_id);
 
+    // Per-company subject override (migration 023). NULL = use the
+    // default hardcoded in outlook.sendDispatchToVendor.
+    const { data: companyRow } = await admin
+      .from('companies')
+      .select('dispatch_email_subject')
+      .eq('id', profile.company_id)
+      .maybeSingle();
+    const dispatchSubjectOverride =
+      (companyRow?.dispatch_email_subject as string | null) ?? null;
+
     const vendorById = new Map((vendorRows ?? []).map((v) => [v.id, v]));
 
     const { data: existingRows, error: existingError } = await admin
@@ -293,6 +303,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             },
             lineItemCount: lineItemCount ?? 0,
             formUrl: submitUrl,
+            subjectOverride: dispatchSubjectOverride,
           },
         );
         if (!emailResult.success) {
