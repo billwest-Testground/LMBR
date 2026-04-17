@@ -50,3 +50,6 @@ Thumbs.db
 # Supabase
 supabase/.branches
 supabase/.temp
+
+# gstack — local security reports, analytics, review logs
+.gstack/

@@ -101,6 +101,7 @@ interface VendorBidRow {
   vendor_id: string;
   company_id: string;
   status: 'pending' | 'submitted' | 'partial' | 'declined' | 'expired';
+  token: string | null;
 }
 
 interface BidRow {
@@ -148,7 +149,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // --- vendor_bids row lookup --------------------------------------------
     const { data: vbData, error: vbError } = await admin
       .from('vendor_bids')
-      .select('id, bid_id, vendor_id, company_id, status')
+      .select('id, bid_id, vendor_id, company_id, status, token')
       .eq('id', payload.vendorBidId)
       .maybeSingle();
     if (vbError) {
@@ -158,6 +159,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const vendorBid = vbData as VendorBidRow | null;
     if (!vendorBid) {
       console.warn(`LMBR.ai vendor-submit: no vendor_bids row for id=${payload.vendorBidId}.`);
+      return unauthorized();
+    }
+
+    // --- Token-freshness gate (re-dispatch revokes prior tokens) -----------
+    // The signed payload's identifiers match the row (checked below), but if
+    // the buyer re-dispatched this vendor_bid the row now holds a newer
+    // token. Reject the stale one so the previously-issued link can't be
+    // used after revocation. See /cso 2026-04-17 audit Finding #1.
+    if (vendorBid.token !== token) {
+      console.warn(
+        'LMBR.ai vendor-submit: token superseded for vendor_bid=' + vendorBid.id,
+      );
       return unauthorized();
     }
 
