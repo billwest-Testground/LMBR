@@ -111,7 +111,7 @@ export function ArchiveClient() {
 
       <TabBar current={tab} onChange={setTab} />
 
-      {tab === 'archived' ? <ArchivedBidsTab /> : <SearchTabPlaceholder />}
+      {tab === 'archived' ? <ArchivedBidsTab /> : <SearchTab />}
     </div>
   );
 }
@@ -631,19 +631,554 @@ function FilteredEmptyState() {
 }
 
 // ---------------------------------------------------------------------------
-// Tab 2 — Search placeholder (Step 5 fills this in)
+// Tab 2 — Search (knowledge base over completed + archived bids)
 // ---------------------------------------------------------------------------
 
-function SearchTabPlaceholder() {
+interface SearchFilters {
+  species: string;
+  dimension: string;
+  grade: string;
+  region: string;
+  customer: string;
+  vendor: string;
+  fromDate: string;
+  toDate: string;
+}
+
+const EMPTY_FILTERS: SearchFilters = {
+  species: '',
+  dimension: '',
+  grade: '',
+  region: '',
+  customer: '',
+  vendor: '',
+  fromDate: '',
+  toDate: '',
+};
+
+const SEARCH_SPECIES = [
+  '',
+  'SPF',
+  'DF',
+  'HF',
+  'SYP',
+  'Cedar',
+  'LVL',
+  'OSB',
+  'Plywood',
+  'Treated',
+];
+
+const SEARCH_REGIONS = [
+  { label: 'Any region', value: '' },
+  { label: 'West', value: 'west' },
+  { label: 'Pacific Northwest', value: 'pnw' },
+  { label: 'California', value: 'california' },
+  { label: 'Mountain West', value: 'mountain' },
+  { label: 'Southwest', value: 'southwest' },
+  { label: 'South', value: 'south' },
+  { label: 'Midwest', value: 'midwest' },
+  { label: 'Southeast', value: 'southeast' },
+  { label: 'Northeast', value: 'northeast' },
+];
+
+interface KnowledgeResult {
+  lineId: string;
+  quoteId: string;
+  bidId: string;
+  customerName: string;
+  jobName: string | null;
+  jobAddress: string | null;
+  jobRegion: string | null;
+  bidStatus: string;
+  archivedAt: string | null;
+  bidCreatedAt: string;
+  quoteCreatedAt: string;
+  species: string;
+  dimension: string | null;
+  grade: string | null;
+  length: string | null;
+  unit: string;
+  quantity: number;
+  costPrice: number;
+  sellPrice: number;
+  extendedSell: number;
+  marginPercent: number;
+  vendorId: string | null;
+  vendorName: string | null;
+}
+
+interface KnowledgeAggregates {
+  topVendors: Array<{
+    vendorId: string;
+    vendorName: string;
+    winCount: number;
+  }>;
+  avgMarginPercent: number | null;
+  priceRange: { low: number; median: number; high: number } | null;
+  resultCount: number;
+  uniqueQuotes: number;
+}
+
+interface SearchResponse {
+  results: KnowledgeResult[];
+  aggregates: KnowledgeAggregates;
+}
+
+function SearchTab() {
+  const [filters, setFilters] = React.useState<SearchFilters>(EMPTY_FILTERS);
+  const [state, setState] = React.useState<
+    | { kind: 'idle' }
+    | { kind: 'loading' }
+    | { kind: 'error'; message: string }
+    | { kind: 'ready'; data: SearchResponse }
+  >({ kind: 'idle' });
+
+  function updateFilter<K extends keyof SearchFilters>(
+    key: K,
+    value: SearchFilters[K],
+  ): void {
+    setFilters((prev) => ({ ...prev, [key]: value }));
+  }
+
+  async function runSearch(ev: React.FormEvent<HTMLFormElement>): Promise<void> {
+    ev.preventDefault();
+    setState({ kind: 'loading' });
+    try {
+      const params = new URLSearchParams();
+      for (const [key, value] of Object.entries(filters)) {
+        if (typeof value === 'string' && value.trim().length > 0) {
+          params.set(key, value.trim());
+        }
+      }
+      const qs = params.toString();
+      const res = await fetch(
+        `/api/archive/search${qs.length > 0 ? `?${qs}` : ''}`,
+        { cache: 'no-store' },
+      );
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        setState({
+          kind: 'error',
+          message: body.error ?? `Search failed (${res.status}).`,
+        });
+        return;
+      }
+      const data = (await res.json()) as SearchResponse;
+      setState({ kind: 'ready', data });
+    } catch (err) {
+      setState({
+        kind: 'error',
+        message: err instanceof Error ? err.message : 'Search failed.',
+      });
+    }
+  }
+
+  function resetFilters(): void {
+    setFilters(EMPTY_FILTERS);
+    setState({ kind: 'idle' });
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <SearchFilterForm
+        filters={filters}
+        onChange={updateFilter}
+        onSubmit={runSearch}
+        onReset={resetFilters}
+        submitting={state.kind === 'loading'}
+      />
+
+      {state.kind === 'idle' ? (
+        <SearchIdleState />
+      ) : state.kind === 'loading' ? (
+        <LoadingShell />
+      ) : state.kind === 'error' ? (
+        <ErrorShell
+          message={state.message}
+          onRetry={() => setState({ kind: 'idle' })}
+        />
+      ) : (
+        <SearchResultsPanel data={state.data} />
+      )}
+    </div>
+  );
+}
+
+function SearchFilterForm({
+  filters,
+  onChange,
+  onSubmit,
+  onReset,
+  submitting,
+}: {
+  filters: SearchFilters;
+  onChange: <K extends keyof SearchFilters>(
+    key: K,
+    value: SearchFilters[K],
+  ) => void;
+  onSubmit: (ev: React.FormEvent<HTMLFormElement>) => void;
+  onReset: () => void;
+  submitting: boolean;
+}) {
+  return (
+    <form
+      onSubmit={onSubmit}
+      className="flex flex-col gap-3 rounded-md border border-border-subtle bg-bg-surface p-3"
+    >
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-4">
+        <SelectField
+          label="Species"
+          value={filters.species}
+          onChange={(v) => onChange('species', v)}
+          options={SEARCH_SPECIES.map((s) => ({
+            value: s,
+            label: s === '' ? 'Any species' : s,
+          }))}
+        />
+        <TextField
+          label="Dimension"
+          value={filters.dimension}
+          onChange={(v) => onChange('dimension', v)}
+          placeholder="2x4, 2x6, …"
+        />
+        <TextField
+          label="Grade"
+          value={filters.grade}
+          onChange={(v) => onChange('grade', v)}
+          placeholder="#2, Stud, …"
+        />
+        <SelectField
+          label="Region"
+          value={filters.region}
+          onChange={(v) => onChange('region', v)}
+          options={SEARCH_REGIONS}
+        />
+        <TextField
+          label="Customer"
+          value={filters.customer}
+          onChange={(v) => onChange('customer', v)}
+          placeholder="Contains match"
+        />
+        <TextField
+          label="Vendor"
+          value={filters.vendor}
+          onChange={(v) => onChange('vendor', v)}
+          placeholder="Contains match"
+        />
+        <TextField
+          label="From date"
+          type="date"
+          value={filters.fromDate}
+          onChange={(v) => onChange('fromDate', v)}
+        />
+        <TextField
+          label="To date"
+          type="date"
+          value={filters.toDate}
+          onChange={(v) => onChange('toDate', v)}
+        />
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="text-body-sm text-text-tertiary">
+          Searches completed and archived bids only. Drafts are excluded.
+        </span>
+        <div className="flex gap-2">
+          <Button variant="ghost" type="button" onClick={onReset} disabled={submitting}>
+            Reset
+          </Button>
+          <Button variant="primary" type="submit" loading={submitting}>
+            Search
+          </Button>
+        </div>
+      </div>
+    </form>
+  );
+}
+
+function TextField({
+  label,
+  value,
+  onChange,
+  placeholder,
+  type = 'text',
+}: {
+  label: string;
+  value: string;
+  onChange: (next: string) => void;
+  placeholder?: string;
+  type?: 'text' | 'date';
+}) {
+  return (
+    <label className="flex flex-col gap-1 text-body-sm">
+      <span className="text-label uppercase text-text-tertiary">{label}</span>
+      <input
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className={cn(
+          'rounded-sm border border-border-strong bg-bg-input px-2 py-1.5 text-body text-text-primary',
+          'focus-visible:outline-none focus-visible:shadow-accent',
+          'placeholder:text-text-tertiary',
+        )}
+      />
+    </label>
+  );
+}
+
+function SelectField({
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  label: string;
+  value: string;
+  onChange: (next: string) => void;
+  options: Array<{ value: string; label: string }>;
+}) {
+  return (
+    <label className="flex flex-col gap-1 text-body-sm">
+      <span className="text-label uppercase text-text-tertiary">{label}</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className={cn(
+          'rounded-sm border border-border-strong bg-bg-input px-2 py-1.5 text-body text-text-primary',
+          'focus-visible:outline-none focus-visible:shadow-accent',
+        )}
+      >
+        {options.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function SearchIdleState() {
   return (
     <div className="mx-auto flex w-full max-w-xl flex-col items-center gap-3 rounded-md border border-border-base bg-bg-surface px-6 py-12 text-center shadow-sm">
       <Search className="h-12 w-12 text-text-tertiary" aria-hidden="true" />
       <h2 className="text-h3 text-text-secondary">Knowledge base search</h2>
       <p className="max-w-md text-body-sm text-text-tertiary">
-        Search across all completed and archived bids. Coming in this session.
+        Filter by species, dimension, region, customer, vendor, or date
+        range. Results pull from every quote this company has ever
+        committed to — the platform&apos;s memory of what you paid and
+        who won.
       </p>
     </div>
   );
+}
+
+function SearchResultsPanel({ data }: { data: SearchResponse }) {
+  const { results, aggregates } = data;
+  if (results.length === 0) {
+    return (
+      <div className="mx-auto flex w-full max-w-xl flex-col items-center gap-3 rounded-md border border-border-base bg-bg-surface px-6 py-10 text-center shadow-sm">
+        <Search className="h-10 w-10 text-text-tertiary" aria-hidden="true" />
+        <h2 className="text-h3 text-text-secondary">No matching lines</h2>
+        <p className="max-w-md text-body-sm text-text-tertiary">
+          Loosen a filter or widen the date range. The knowledge base
+          only indexes quotes that moved past draft — newer companies
+          may need a few complete bids before results show up.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <AggregatesRow aggregates={aggregates} />
+      <ResultsTable results={results} />
+    </div>
+  );
+}
+
+function AggregatesRow({ aggregates }: { aggregates: KnowledgeAggregates }) {
+  const fmt2 = new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  const pct = (n: number): string => `${(n * 100).toFixed(2)}%`;
+  return (
+    <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+      <SummaryCard
+        label="Top vendors"
+        value={
+          aggregates.topVendors.length === 0
+            ? '—'
+            : aggregates.topVendors.length.toString()
+        }
+        caption={
+          aggregates.topVendors.length === 0
+            ? 'no vendor data'
+            : 'by lines won'
+        }
+      >
+        {aggregates.topVendors.length > 0 ? (
+          <ol className="mt-2 flex flex-col gap-1 text-body-sm">
+            {aggregates.topVendors.slice(0, 5).map((v, index) => (
+              <li
+                key={v.vendorId}
+                className="flex items-baseline justify-between gap-2 text-text-secondary"
+              >
+                <span className="truncate">
+                  {index + 1}. {v.vendorName}
+                </span>
+                <span className="font-mono tabular-nums text-text-tertiary">
+                  {v.winCount}
+                </span>
+              </li>
+            ))}
+          </ol>
+        ) : null}
+      </SummaryCard>
+      <SummaryCard
+        label="Average margin"
+        value={
+          aggregates.avgMarginPercent === null
+            ? '—'
+            : pct(aggregates.avgMarginPercent)
+        }
+        caption={
+          aggregates.uniqueQuotes > 0
+            ? `across ${aggregates.uniqueQuotes} ${
+                aggregates.uniqueQuotes === 1 ? 'quote' : 'quotes'
+              }`
+            : ''
+        }
+      />
+      <SummaryCard
+        label="Cost price range"
+        value={
+          aggregates.priceRange
+            ? fmt2.format(aggregates.priceRange.median)
+            : '—'
+        }
+        caption={
+          aggregates.priceRange
+            ? `${fmt2.format(aggregates.priceRange.low)} — ${fmt2.format(aggregates.priceRange.high)}`
+            : 'no priced lines'
+        }
+      />
+    </div>
+  );
+}
+
+function SummaryCard({
+  label,
+  value,
+  caption,
+  children,
+}: {
+  label: string;
+  value: string;
+  caption?: string;
+  children?: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-md border border-border-base bg-bg-surface px-4 py-3 shadow-sm">
+      <div className="text-label uppercase text-text-tertiary">{label}</div>
+      <div className="mt-1 font-mono text-[24px] font-semibold leading-none tabular-nums text-text-primary">
+        {value}
+      </div>
+      {caption ? (
+        <div className="mt-1 text-body-sm text-text-tertiary">{caption}</div>
+      ) : null}
+      {children}
+    </div>
+  );
+}
+
+function ResultsTable({ results }: { results: KnowledgeResult[] }) {
+  const fmt2 = new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  return (
+    <div className="overflow-hidden rounded-md border border-border-base bg-bg-surface shadow-sm">
+      <div className="overflow-x-auto">
+        <table className="w-full border-separate border-spacing-0 text-body-sm">
+          <thead className="bg-bg-surface">
+            <tr>
+              <Th>Species</Th>
+              <Th>Dim / grade</Th>
+              <Th>Customer</Th>
+              <Th>Region</Th>
+              <Th>Vendor</Th>
+              <Th align="right">Qty</Th>
+              <Th align="right">Cost</Th>
+              <Th align="right">Sell</Th>
+              <Th>Date</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {results.map((r) => {
+              const descParts: string[] = [];
+              if (r.dimension) descParts.push(r.dimension);
+              if (r.grade) descParts.push(r.grade);
+              return (
+                <tr
+                  key={r.lineId}
+                  className="transition-colors duration-micro hover:bg-bg-subtle"
+                >
+                  <Td>{r.species}</Td>
+                  <Td className="text-text-secondary">
+                    {descParts.join(' · ') || '—'}
+                  </Td>
+                  <Td className="max-w-[18ch] truncate">
+                    <Link
+                      href={`/bids/${r.bidId}`}
+                      className="text-text-primary hover:text-accent-primary"
+                      title={r.jobName ? `${r.customerName} · ${r.jobName}` : r.customerName}
+                    >
+                      {r.customerName}
+                    </Link>
+                  </Td>
+                  <Td className="text-text-secondary">
+                    {r.jobRegion ?? '—'}
+                  </Td>
+                  <Td className="text-text-secondary">
+                    {r.vendorName ?? '—'}
+                  </Td>
+                  <Td align="right" className="font-mono tabular-nums">
+                    {r.quantity}
+                  </Td>
+                  <Td align="right" className="font-mono tabular-nums">
+                    {fmt2.format(r.costPrice)}
+                  </Td>
+                  <Td align="right" className="font-mono tabular-nums">
+                    {fmt2.format(r.sellPrice)}
+                  </Td>
+                  <Td className="text-text-tertiary">
+                    {formatAbsoluteDate(r.bidCreatedAt)}
+                  </Td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function formatAbsoluteDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+  });
 }
 
 // ---------------------------------------------------------------------------
