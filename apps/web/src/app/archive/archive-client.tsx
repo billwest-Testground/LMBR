@@ -42,6 +42,7 @@ import { useSearchParams } from 'next/navigation';
 import {
   AlertTriangle,
   Archive as ArchiveIcon,
+  HelpCircle,
   Search,
   X,
 } from 'lucide-react';
@@ -177,10 +178,11 @@ function ArchivedBidsTab() {
   const [searchText, setSearchText] = React.useState('');
   const [fromDate, setFromDate] = React.useState('');
   const [toDate, setToDate] = React.useState('');
-  // "Bid multiple times" toggle — Step 4 wires the actual filter.
-  // Rendered as a disabled placeholder here so the UI contract is
-  // visible in review.
-  const [repeatsOnly] = React.useState(false);
+  // "Repeated jobs only" toggle — shows rows whose (customer, address)
+  // pair appears more than once in the archive. `repeatCount` is already
+  // populated per row from GET /api/archive (counted server-side over
+  // the response set), so the filter is pure client-side.
+  const [repeatsOnly, setRepeatsOnly] = React.useState(false);
 
   // Reactivation modal state — one modal shared across rows.
   const [modal, setModal] = React.useState<ArchiveBid | null>(null);
@@ -238,9 +240,11 @@ function ArchivedBidsTab() {
         searchText={searchText}
         fromDate={fromDate}
         toDate={toDate}
+        repeatsOnly={repeatsOnly}
         onSearch={setSearchText}
         onFromDate={setFromDate}
         onToDate={setToDate}
+        onRepeatsOnly={setRepeatsOnly}
       />
 
       {toast ? (
@@ -300,17 +304,21 @@ function FilterBar({
   searchText,
   fromDate,
   toDate,
+  repeatsOnly,
   onSearch,
   onFromDate,
   onToDate,
+  onRepeatsOnly,
 }: {
   count: number;
   searchText: string;
   fromDate: string;
   toDate: string;
+  repeatsOnly: boolean;
   onSearch: (next: string) => void;
   onFromDate: (next: string) => void;
   onToDate: (next: string) => void;
+  onRepeatsOnly: (next: boolean) => void;
 }) {
   return (
     <div className="flex flex-wrap items-end gap-3 rounded-md border border-border-subtle bg-bg-surface p-3">
@@ -355,13 +363,21 @@ function FilterBar({
           )}
         />
       </label>
-      <label
-        className="flex cursor-not-allowed items-center gap-2 text-body-sm opacity-50"
-        title="Enabled in Step 4"
-      >
-        <input type="checkbox" disabled className="h-4 w-4" />
-        <span className="text-text-secondary">Bid multiple times</span>
-        <span className="text-label uppercase text-text-tertiary">coming soon</span>
+      <label className="flex cursor-pointer items-center gap-2 text-body-sm">
+        <input
+          type="checkbox"
+          checked={repeatsOnly}
+          onChange={(e) => onRepeatsOnly(e.target.checked)}
+          className="h-4 w-4 cursor-pointer accent-accent-primary"
+        />
+        <span className="text-text-secondary">Repeated jobs only</span>
+        <span
+          title="Shows jobs where the same customer and address appears more than once in your archive. Useful for finding delayed or rebid projects."
+          className="inline-flex cursor-help items-center text-text-tertiary"
+          aria-label="Repeated jobs only — explanation"
+        >
+          <HelpCircle className="h-3.5 w-3.5" aria-hidden="true" />
+        </span>
       </label>
       <div className="ml-auto rounded-sm border border-border-subtle bg-bg-subtle px-2 py-1 text-label uppercase text-text-tertiary">
         {count} archived {count === 1 ? 'bid' : 'bids'}
