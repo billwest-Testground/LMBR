@@ -768,7 +768,66 @@ Track progress here as modules are completed:
       — floor, math, cascade, composition, idempotency. Plus
       smoke-e2e Step 10 verifies the anonymization floor fires end-
       to-end through the DB (1-company seed → 0 slices written).
-- [ ] PROMPT 10 — Archive + knowledge base
+- [x] PROMPT 10 — Archive + knowledge base
+    - **Archive system**
+      - `archived_at IS NULL` is the single source of truth for
+        "active bid." NOT `status === 'archived'`. Every query that
+        used to filter on the status value was migrated to the
+        dedicated column in Prompt 10 Step 2 (trader-panel,
+        market-client bid selector, market-agent aggregation).
+      - The legacy `'archived'` value in `bid_status` enum (migration
+        003) is dormant — nothing writes it, nothing reads it. Left
+        in the enum to avoid an `ALTER TYPE` migration; drop in a
+        future housekeeping pass if it ever matters.
+      - Role gate on archive + reactivate: `trader_buyer` /
+        `manager` / `owner` can act on any bid in the tenant.
+        `trader` can act only when `assigned_trader_id` OR
+        `created_by` matches the session user. `buyer` cannot
+        archive — buyer role is vendor-pricing, not bid-lifecycle.
+      - Reactivation modes (body `{ mode: 'continue' | 'fresh' }`):
+          `continue` clears archive columns only — preserves status,
+            consolidation_mode, bid_routings, line_items, vendor_bids.
+          `fresh` clears archive columns AND resets `status =
+            'received'`, `consolidation_mode = 'structured'`,
+            DELETEs `bid_routings` rows for the bid. `line_items`
+            and `vendor_bids` are always preserved — they are
+            tenant archive data, not throwaway.
+      - Migration 027 added `bids.archived_at timestamptz` +
+        `archived_by uuid REFERENCES users(id) ON DELETE SET NULL`
+        (audit timestamp survives user deletion). Three partial
+        indexes:
+          `(company_id, created_at desc) WHERE archived_at IS NULL`
+          `(company_id, archived_at desc) WHERE archived_at IS NOT NULL`
+          `(company_id, customer_name, job_address) WHERE archived_at IS NOT NULL`
+    - **Knowledge-base search (GET /api/archive/search)**
+      - Base table: `quote_line_items` — NOT `vendor_bid_line_items`.
+        Scopes the signal to prices the tenant ACTUALLY committed
+        to (transaction history), not every unselected vendor
+        offer. The knowledge base answers "what did we pay," not
+        "what were we quoted."
+      - Scope: a line is included when the parent quote's status
+        is not `'draft'` OR the parent bid is archived. Completion
+        gate is applied in TypeScript after fetch because
+        PostgREST `.or()` across joined tables is awkward and the
+        filter is cheap.
+      - Aggregations in the same response:
+          `topVendors`: lines won per vendor, top 10, ties broken
+            alphabetically.
+          `avgMarginPercent`: median-per-quote, then mean across
+            quotes. Robust against outlier lines within a single
+            quote; weights each quote equally regardless of line
+            count.
+          `priceRange`: min / median / high over `cost_price`
+            (not `sell_price`) — the question is "what did we
+            pay."
+      - Session-auth, RLS-scoped to the tenant via the session
+        client. No LLM on this path — pure SQL + TS aggregations,
+        same discipline as comparison-agent and market-agent.
+    - The longer a company uses LMBR, the more valuable their
+      archive becomes. This is the switching-cost engine: every
+      closed quote adds a row to the knowledge base, and that
+      history is RLS-locked to the tenant by design. Making this
+      data portable is intentionally hard.
 - [ ] PROMPT 11 — Settings + company config
 - [ ] PROMPT 12 — Polish + QA pass
 - [ ] Demo seed data
