@@ -261,13 +261,18 @@ function formatQty(value: number): string {
   }).format(value);
 }
 
-function formatDateISO(iso: string): string {
+// Default timezone when companies.timezone is null. Matches the West
+// Coast tenant majority in the target list; see migration 022 comment.
+const DEFAULT_PDF_TIMEZONE = 'America/Los_Angeles';
+
+function formatDateISO(iso: string, timezone: string | null): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return new Intl.DateTimeFormat('en-US', {
     year: 'numeric',
     month: 'short',
     day: '2-digit',
+    timeZone: timezone ?? DEFAULT_PDF_TIMEZONE,
   }).format(d);
 }
 
@@ -291,10 +296,10 @@ function Header({ input }: { input: QuotePdfInput }) {
           <Text style={styles.quoteLabel}>Quote</Text>
           <Text style={styles.quoteNumber}>{input.quoteNumber}</Text>
           <Text style={styles.quoteDateRow}>
-            Date: {formatDateISO(input.quoteDate)}
+            Date: {formatDateISO(input.quoteDate, input.timezone)}
           </Text>
           <Text style={styles.quoteDateRow}>
-            Valid: {formatDateISO(input.validUntil)}
+            Valid: {formatDateISO(input.validUntil, input.timezone)}
           </Text>
         </View>
       </View>

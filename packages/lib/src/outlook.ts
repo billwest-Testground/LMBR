@@ -546,9 +546,23 @@ export interface OutlookMailParams {
   attachments?: OutlookAttachment[];
 }
 
+/**
+ * Stable short-code error classification for sendMail failures. Callers
+ * (dispatch, nudge, quote send) branch on these to decide whether to
+ * surface "connect your Outlook" UX vs a generic retry banner, without
+ * pattern-matching the free-text message. Unknown failures return
+ * `send_failed` with the underlying message in `error` for diagnostics.
+ */
+export type OutlookMailErrorCode =
+  | 'outlook_not_connected'
+  | 'outlook_needs_reauth'
+  | 'send_failed';
+
 export interface OutlookMailResult {
   success: boolean;
-  /** Populated on failure. Never contains tokens or secrets. */
+  /** Stable short code; callers should switch on this, not on `error`. */
+  errorCode?: OutlookMailErrorCode;
+  /** Human-readable detail for ops logs. Never contains tokens or secrets. */
   error?: string;
 }
 
@@ -603,8 +617,29 @@ export async function sendMail(
     const message = err instanceof Error ? err.message : String(err);
     // Intentionally terse — never echo tokens or request bodies.
     console.warn(`LMBR.ai outlook.sendMail failed: ${message}`);
-    return { success: false, error: message };
+    return {
+      success: false,
+      errorCode: classifyMailError(message),
+      error: message,
+    };
   }
+}
+
+function classifyMailError(message: string): OutlookMailErrorCode {
+  // getGraphClient throws a stable message when no connection row exists.
+  if (/no connection for user=/.test(message)) {
+    return 'outlook_not_connected';
+  }
+  // Same for 'expired' or 'revoked' connection rows — the user must go
+  // re-consent through /settings/integrations.
+  if (/connection status is '(expired|revoked)'/.test(message)) {
+    return 'outlook_needs_reauth';
+  }
+  // Graph itself returned 401 — refresh_token revoked upstream.
+  if (/InvalidAuthenticationToken|401/.test(message)) {
+    return 'outlook_needs_reauth';
+  }
+  return 'send_failed';
 }
 
 function escapeHtml(input: string): string {

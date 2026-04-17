@@ -45,11 +45,13 @@ export const ExtractionMethodSchema = z.enum([
 ]);
 export type ExtractionMethod = z.infer<typeof ExtractionMethodSchema>;
 
-// Wider enum used only by the cost ledger. Splits the two Claude modes
-// and adds a bucket for the Haiku QA pass so per-phase spend is legible.
+// Wider enum used only by the cost ledger. Splits the two Claude modes,
+// adds a bucket for the Haiku QA pass, and adds `scanback_llm` for the
+// Haiku scan-back price matcher so the manager dashboard can separate
+// inbound-RFQ QA spend from vendor-pricing OCR matching spend.
 export const CostMethodSchema = z.union([
   ExtractionMethodSchema,
-  z.enum(['claude_mode_a', 'claude_mode_b', 'qa_llm']),
+  z.enum(['claude_mode_a', 'claude_mode_b', 'qa_llm', 'scanback_llm']),
 ]);
 export type CostMethod = z.infer<typeof CostMethodSchema>;
 

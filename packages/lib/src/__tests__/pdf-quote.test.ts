@@ -62,6 +62,7 @@ function baseArgs(
       consolidationMode: 'structured',
     },
     company: { name: 'LMBR Supply', slug: 'lmbr', emailDomain: 'lmbr.ai' },
+    timezone: null,
     quoteNumber: 'LMBR-01001',
     quoteDate: new Date('2026-04-15T12:00:00Z'),
     validUntil: new Date('2026-04-22T12:00:00Z'),

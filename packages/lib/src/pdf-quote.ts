@@ -104,6 +104,15 @@ export interface QuotePdfInput {
   quoteNumber: string;
   quoteDate: string;
   validUntil: string;
+  /**
+   * IANA timezone string used by the renderer to format quoteDate +
+   * validUntil in a stable zone — without this the Vercel host prints
+   * UTC while a dev laptop prints local, and two operators see two
+   * different dates on the same quote. Threaded from companies.timezone
+   * (migration 022). Null means "renderer picks a sane default"
+   * (America/Los_Angeles — the West Coast tenant majority).
+   */
+  timezone: string | null;
   customer: {
     name: string;
     jobName: string | null;
@@ -144,6 +153,8 @@ export interface BuildQuotePdfInputArgs {
     consolidationMode: PdfConsolidationMode;
   };
   company: { name: string; slug: string; emailDomain: string | null };
+  /** IANA timezone for date formatting — threaded from companies.timezone. */
+  timezone: string | null;
   quoteNumber: string;
   quoteDate: Date;
   validUntil: Date;
@@ -166,8 +177,16 @@ const DEFAULT_TERMS =
  * from /api/margin never render as $0 rows on the customer PDF.
  */
 export function buildQuotePdfInput(args: BuildQuotePdfInputArgs): QuotePdfInput {
-  const { pricedLines, totals, bid, company, quoteNumber, quoteDate, validUntil } =
-    args;
+  const {
+    pricedLines,
+    totals,
+    bid,
+    company,
+    quoteNumber,
+    quoteDate,
+    validUntil,
+    timezone,
+  } = args;
 
   const priced = pricedLines.filter((l) => l.extendedSell > 0);
 
@@ -180,6 +199,7 @@ export function buildQuotePdfInput(args: BuildQuotePdfInputArgs): QuotePdfInput 
     quoteNumber,
     quoteDate: quoteDate.toISOString(),
     validUntil: validUntil.toISOString(),
+    timezone,
     customer: {
       name: bid.customerName,
       jobName: bid.jobName,

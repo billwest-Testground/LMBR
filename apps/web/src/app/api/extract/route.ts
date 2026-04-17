@@ -70,7 +70,10 @@ import {
   VendorTokenMismatchError,
   verifyVendorBidToken,
 } from '@lmbr/lib';
+import { randomUUID } from 'node:crypto';
 import type { ConsolidationMode } from '@lmbr/types';
+
+import { BIDS_BUCKET } from '../ingest/processor';
 
 export const runtime = 'nodejs';
 // Azure OCR poll + Haiku call can take 20-40s end to end on a photographed
@@ -333,6 +336,38 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       throw err;
     }
 
+    // --- Upload the raw scan to storage ------------------------------------
+    // OCR succeeded so we know the file is meaningful; now persist it so
+    // re-OCR is possible without the vendor re-uploading, and so the
+    // buyer can audit what the vendor actually sent. Signed URL goes on
+    // vendor_bids.raw_response_url during the status update below; the
+    // pre-Prompt-08 path left the column null.
+    const scanExt = extFromFilename(file.name);
+    const scanObjectPath = `${vendorBid.company_id}/scanback/${vendorBid.id}/${randomUUID()}${scanExt}`;
+    let scanSignedUrl: string | null = null;
+    try {
+      const { error: uploadError } = await admin.storage
+        .from(BIDS_BUCKET)
+        .upload(scanObjectPath, buffer, {
+          contentType: mimeType,
+          upsert: false,
+        });
+      if (uploadError) {
+        console.warn(
+          `LMBR.ai extract: raw scan upload failed: ${uploadError.message}.`,
+        );
+      } else {
+        const { data: signed } = await admin.storage
+          .from(BIDS_BUCKET)
+          .createSignedUrl(scanObjectPath, 60 * 60 * 24 * 30);
+        scanSignedUrl = signed?.signedUrl ?? null;
+      }
+    } catch (err) {
+      console.warn(
+        `LMBR.ai extract: raw scan upload threw: ${err instanceof Error ? err.message : String(err)}.`,
+      );
+    }
+
     // --- Build expected lines for the agent -------------------------------
     const expectedLines: ScanbackExpectedLine[] = lineRows.map((r) => ({
       lineItemId: r.id,
@@ -459,10 +494,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       .update({
         status,
         submitted_at: nowIso,
-        // Paper path — record the method for the vendor-status board and
-        // for downstream analytics. raw_response_url stays null; file
-        // retention lives in Prompt 08 integration.
         submission_method: 'scan',
+        // Prompt 08: populated from the raw-scan storage upload above.
+        // Stays null when the upload failed so the caller can re-upload
+        // without a stale URL lingering on the row.
+        raw_response_url: scanSignedUrl,
       })
       .eq('id', vendorBid.id);
     if (statusError) {
@@ -486,11 +522,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       costCents: ocrCostCents,
     });
     if (scanResult.costCents > 0) {
-      // TODO(prompt-08): add 'scanback_llm' to CostMethodSchema so this doesn't alias qa_llm
+      // Prompt 08: dedicated cost bucket. Was aliasing 'qa_llm' until the
+      // CostMethodSchema widened in packages/types/src/line-item.ts.
       void recordExtraction({
         bidId: vendorBid.bid_id,
         companyId: vendorBid.company_id,
-        method: 'qa_llm',
+        method: 'scanback_llm',
         costCents: scanResult.costCents,
       });
     }
@@ -517,4 +554,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       { status: 500 },
     );
   }
+}
+
+// Safe file extension helper. Rejects anything that isn't a short
+// alphanumeric suffix so a hostile filename cannot smuggle path
+// separators or other shell-unsafe characters into the storage key.
+function extFromFilename(name: string): string {
+  const dot = name.lastIndexOf('.');
+  if (dot < 0 || dot === name.length - 1) return '';
+  const ext = name.slice(dot).toLowerCase();
+  if (!/^\.[a-z0-9]{1,8}$/.test(ext)) return '';
+  return ext;
 }

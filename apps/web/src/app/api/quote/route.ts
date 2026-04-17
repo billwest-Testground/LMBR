@@ -159,7 +159,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         .maybeSingle(),
       supabase
         .from('companies')
-        .select('id, name, slug, email_domain')
+        .select('id, name, slug, email_domain, timezone')
         .eq('id', profile.company_id)
         .maybeSingle(),
       supabase
@@ -355,6 +355,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           slug: (company.slug as string) ?? 'lmbr',
           emailDomain: (company.email_domain as string | null) ?? null,
         },
+        timezone: (company.timezone as string | null) ?? null,
         quoteNumber,
         quoteDate,
         validUntil,

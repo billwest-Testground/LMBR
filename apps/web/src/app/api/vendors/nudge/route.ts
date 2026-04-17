@@ -1,26 +1,23 @@
 /**
- * POST /api/vendors/nudge — (STUB) Reminder email to a dispatched vendor.
+ * POST /api/vendors/nudge — Reminder email to a dispatched vendor.
  *
- * Purpose:  The buyer's status board (Task 6) surfaces a "Nudge" button on
- *           every `vendor_bids` row so they can prod a quiet vendor without
- *           leaving the page. This route is the stubbed landing pad for
- *           that button: it authenticates the user, proves tenant access
- *           to the vendor_bid row, and logs the intent.
+ * Purpose:  The buyer's status board surfaces a "Nudge" button on every
+ *           `vendor_bids` row so they can prod a quiet vendor without
+ *           leaving the page. This route authenticates the user, proves
+ *           tenant access to the vendor_bid row, and sends a follow-up
+ *           email from the buyer's own Outlook account (CLAUDE.md rule
+ *           #5 — emails never come from a generic LMBR address).
  *
- *           Prompt 08 will replace the `console.log` below with a Microsoft
- *           Graph send-mail call templated by @lmbr/lib/outlook.ts (the
- *           email must come from the buyer's own Outlook account, not a
- *           generic LMBR address — see CLAUDE.md non-negotiable #5).
- *
- *           TODO (Prompt 08): swap the console.log for a Graph send-mail
- *           call. Template should re-issue the vendor's submit URL, quote
- *           the dueBy label (shared formatDueByLabel helper), and CC the
- *           buyer's own inbox so they have a paper trail.
+ *           Email failure is surfaced in the response, never thrown.
+ *           `error` is the short-code from OutlookMailErrorCode when
+ *           available — UI branches on 'outlook_not_connected' to show
+ *           the "connect your Outlook" prompt rather than a generic
+ *           retry banner.
  *
  * Inputs:   { vendorBidId: uuid }
- * Outputs:  { success: true, stubbed: true, message: string }
- * Agent/API: none yet (stub). Prompt 08 wires Microsoft Graph.
- * Imports:  zod, next/server, Supabase session client.
+ * Outputs:  { success: boolean, error: string | null }
+ * Agent/API: Microsoft Graph via @lmbr/lib/outlook.
+ * Imports:  zod, next/server, Supabase session client, @lmbr/lib.
  *
  * LMBR.ai — Enterprise AI bid automation for wholesale lumber distributors.
  * Built by Worklighter.
@@ -29,6 +26,8 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { z } from 'zod';
 
+import { getSupabaseAdmin, sendVendorNudge } from '@lmbr/lib';
+
 import { getSupabaseRouteHandlerClient } from '../../../../lib/supabase/server';
 
 export const runtime = 'nodejs';
@@ -36,6 +35,15 @@ export const runtime = 'nodejs';
 const BodySchema = z.object({
   vendorBidId: z.string().uuid(),
 });
+
+function buildSubmitUrl(token: string): string {
+  const base = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/+$/, '') ?? '';
+  return `${base}/vendor-submit/${token}`;
+}
+
+function hoursBetween(nowMs: number, laterMs: number): number {
+  return Math.max(0, Math.round((laterMs - nowMs) / (60 * 60 * 1000)));
+}
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
@@ -65,9 +73,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ error: 'User profile not found' }, { status: 403 });
     }
 
-    // Role gate — nudging vendors is a buyer-aligned action. Mirrors the
-    // roles lookup pattern in /api/route-bid (where the same table is used
-    // to build RoutingRoleType[] for the submitting user).
+    // Role gate — nudging vendors is a buyer-aligned action.
     const { data: userRoles } = await sessionClient
       .from('roles')
       .select('role_type')
@@ -87,7 +93,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // query returns null and we respond 404 without leaking existence.
     const { data: vendorBid, error: vbError } = await sessionClient
       .from('vendor_bids')
-      .select('id, bid_id, vendor_id, company_id')
+      .select('id, bid_id, vendor_id, company_id, token, due_by, status')
       .eq('id', vendorBidId)
       .maybeSingle();
     if (vbError) {
@@ -99,20 +105,83 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     if (vendorBid.company_id !== profile.company_id) {
       return NextResponse.json({ error: 'Vendor bid belongs to a different company' }, { status: 403 });
     }
+    if (vendorBid.status === 'declined' || vendorBid.status === 'expired') {
+      // Nothing to nudge — the row is closed. Surface without send attempt.
+      return NextResponse.json({
+        success: false,
+        error: 'vendor_bid_closed',
+      });
+    }
+    if (!vendorBid.token) {
+      // Pre-Prompt-05 vendor_bids rows don't have tokens. Can't nudge
+      // without a submission link; surface as a no-op with a code the UI
+      // can show as "re-dispatch needed".
+      return NextResponse.json({
+        success: false,
+        error: 'no_token_on_row',
+      });
+    }
 
-    // STUB — Prompt 08 will replace this with a Graph API send-mail call
-    // templated by @lmbr/lib/outlook.ts. Until then we only log intent.
-    console.log('[nudge-stub]', {
-      vendorBidId: vendorBid.id,
-      bidId: vendorBid.bid_id,
-      vendorId: vendorBid.vendor_id,
-      userId: profile.id,
+    // Load bid + vendor (service role — we already own the tenant check
+    // via RLS on vendor_bids above; this is a faster path than routing
+    // another RLS query and lets us read vendor.email cleanly).
+    const admin = getSupabaseAdmin();
+    const [bidResult, vendorResult] = await Promise.all([
+      admin
+        .from('bids')
+        .select('id, company_id, job_name, customer_name')
+        .eq('id', vendorBid.bid_id as string)
+        .maybeSingle(),
+      admin
+        .from('vendors')
+        .select('id, company_id, name, email')
+        .eq('id', vendorBid.vendor_id as string)
+        .maybeSingle(),
+    ]);
+
+    const bid = bidResult.data;
+    const vendor = vendorResult.data;
+    if (!bid || bid.company_id !== profile.company_id) {
+      return NextResponse.json({ error: 'Bid not found' }, { status: 404 });
+    }
+    if (!vendor || vendor.company_id !== profile.company_id) {
+      return NextResponse.json({ error: 'Vendor not found' }, { status: 404 });
+    }
+    if (!vendor.email) {
+      return NextResponse.json({
+        success: false,
+        error: 'no_vendor_email',
+      });
+    }
+
+    const dueByMs = vendorBid.due_by
+      ? new Date(vendorBid.due_by as string).getTime()
+      : Date.now();
+    const hoursRemaining = hoursBetween(Date.now(), dueByMs);
+    const formUrl = buildSubmitUrl(vendorBid.token as string);
+
+    const result = await sendVendorNudge(profile.id, profile.company_id, {
+      vendor: { name: vendor.name as string, email: vendor.email as string },
+      bid: {
+        jobName: (bid.job_name as string | null) ?? null,
+        customerName: (bid.customer_name as string | null) ?? null,
+        dueByIso: vendorBid.due_by
+          ? (vendorBid.due_by as string)
+          : new Date().toISOString(),
+      },
+      hoursRemaining,
+      formUrl,
     });
 
+    if (!result.success) {
+      console.warn(
+        `LMBR.ai nudge: email failed for vendorBidId=${vendorBidId} bidId=${bid.id}: ${result.errorCode ?? 'unknown'}.`,
+      );
+    }
+
     return NextResponse.json({
-      success: true,
-      stubbed: true,
-      message: 'Outlook integration lands in Prompt 08',
+      success: result.success,
+      error: result.success ? null : (result.errorCode ?? 'send_failed'),
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Nudge failed';

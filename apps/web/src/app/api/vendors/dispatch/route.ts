@@ -40,7 +40,11 @@ import { randomUUID } from 'crypto';
 import { NextResponse, type NextRequest } from 'next/server';
 import { z } from 'zod';
 
-import { createVendorBidToken, getSupabaseAdmin } from '@lmbr/lib';
+import {
+  createVendorBidToken,
+  getSupabaseAdmin,
+  sendDispatchToVendor,
+} from '@lmbr/lib';
 import { VendorSubmissionMethodSchema } from '@lmbr/types';
 
 import { getSupabaseRouteHandlerClient } from '../../../../lib/supabase/server';
@@ -78,6 +82,8 @@ interface DispatchedEntry {
 interface SkippedEntry {
   vendorId: string;
   reason: string;
+  /** Populated on email failure; short-code from OutlookMailErrorCode. */
+  error?: string;
 }
 
 function buildSubmitUrl(token: string): string {
@@ -129,7 +135,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     const { data: bid, error: bidError } = await sessionClient
       .from('bids')
-      .select('id, company_id, status')
+      .select('id, company_id, status, job_name, customer_name, job_address')
       .eq('id', bidId)
       .maybeSingle();
     if (bidError) {
@@ -153,11 +159,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const uniqueVendorIds = [...new Set(vendorIds)];
     const { data: vendorRows, error: vendorError } = await admin
       .from('vendors')
-      .select('id, company_id, name, active')
+      .select('id, company_id, name, email, active')
       .in('id', uniqueVendorIds);
     if (vendorError) {
       return NextResponse.json({ error: vendorError.message }, { status: 500 });
     }
+
+    // Count of vendor-visible line items for the dispatch email body.
+    // Cheap (server-side count); we render a single number in the template,
+    // so we don't need the rows themselves here.
+    const { count: lineItemCount } = await admin
+      .from('line_items')
+      .select('id', { count: 'exact', head: true })
+      .eq('bid_id', bidId)
+      .eq('company_id', profile.company_id);
 
     const vendorById = new Map((vendorRows ?? []).map((v) => [v.id, v]));
 
@@ -244,16 +259,67 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         continue;
       }
 
+      const submitUrl = buildSubmitUrl(token);
+      const printUrl = buildPrintUrl(token);
+
       dispatched.push({
         vendorBidId,
         vendorId,
         vendorName: vendor.name,
         token,
-        submitUrl: buildSubmitUrl(token),
-        printUrl: buildPrintUrl(token),
+        submitUrl,
+        printUrl,
         tokenExpiresAt,
         status: 'pending',
       });
+
+      // Fire the dispatch email from the buyer's own Outlook mailbox.
+      // Failure here MUST NOT reverse the dispatch — the DB write is the
+      // source of truth. Surface email outcome alongside in `skipped[]`
+      // with an `error` short-code so the UI can prompt "connect Outlook"
+      // when needed without losing the fact that the vendor_bid row is
+      // live and the URL is already usable.
+      if (vendor.email) {
+        const emailResult = await sendDispatchToVendor(
+          profile.id,
+          profile.company_id,
+          {
+            vendor: { name: vendor.name, email: vendor.email },
+            bid: {
+              jobName: (bid.job_name as string | null) ?? null,
+              customerName: (bid.customer_name as string | null) ?? null,
+              jobLocation: (bid.job_address as string | null) ?? null,
+              dueByIso: dueByDate.toISOString(),
+            },
+            lineItemCount: lineItemCount ?? 0,
+            formUrl: submitUrl,
+          },
+        );
+        if (!emailResult.success) {
+          console.warn(
+            `LMBR.ai dispatch: email failed for vendorId=${vendorId} bidId=${bidId}: ${emailResult.errorCode ?? 'unknown'}.`,
+          );
+          skipped.push({
+            vendorId,
+            reason:
+              emailResult.errorCode === 'outlook_not_connected'
+                ? 'email_not_sent:outlook_not_connected'
+                : emailResult.errorCode === 'outlook_needs_reauth'
+                  ? 'email_not_sent:outlook_needs_reauth'
+                  : 'email_not_sent',
+            error: emailResult.errorCode ?? 'send_failed',
+          });
+        }
+      } else {
+        // Vendor has no email on file — DB write succeeded, we just have
+        // no way to reach them. Report so the UI can prompt to edit the
+        // vendor record.
+        skipped.push({
+          vendorId,
+          reason: 'email_not_sent:no_vendor_email',
+          error: 'no_vendor_email',
+        });
+      }
     }
 
     if (bid.status === 'routing' && dispatched.length > 0) {
