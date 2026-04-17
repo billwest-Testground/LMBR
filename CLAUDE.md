@@ -706,21 +706,26 @@ Track progress here as modules are completed:
       Prompt 08 needs to surface the note in the Outlook email body.
       Mobile push-notification registration for new approvals is
       stubbed with a code comment pointing here.
-- [ ] PROMPT 08 — Outlook integration
-    - **Prompt 08 hand-off notes:** `POST /api/vendors/nudge` is a stub
-      today (returns `{ ok: true, stubbed: true }`) — wire it to Graph
-      API sendmail. `vendor_bids.raw_response_url` stays `null` today;
-      Prompt 08 should upload scan-back files to object storage and
-      populate it before flipping status so re-OCR is possible.
-      `TALLY_TIMEZONE` is hardcoded to `'America/New_York'` in
-      `apps/web/src/lib/format-datetime.ts`; when the `companies.timezone`
-      column ships, thread it through the render props. Cost ledger
-      TODO: add `'scanback_llm'` enum value to `CostMethodSchema`
-      (currently aliased as `'qa_llm'` in `/api/extract`).
-      Quote delivery: the "Send via Outlook" modal at
-      `apps/web/src/components/bids/quote-preview-client.tsx` is a
-      labeled stub — Prompt 08 wires Graph API sendmail and flips
-      `quotes.status` `'approved'` → `'sent'`.
+- [x] PROMPT 08 — Outlook integration
+    - Outlook integration complete. OAuth flow + encrypted token
+      storage + webhook handler + dispatch/nudge/quote email sends
+      + integrations settings UI + subscription renewal cron target
+      + raw_response_url + timezone threading + cost method enum.
+    - Webhook validation handshake: confirmed working.
+      Subscription creation: requires M365 work/school account.
+      Personal accounts (hotmail/outlook.com) not supported by
+      Graph change notifications. Test with M365 dev account
+      before production.
+      Sign up: https://developer.microsoft.com/microsoft-365/dev-program
+    - `MICROSOFT_REDIRECT_URI` must match exactly in both
+      `.env.local` and Azure AD app registration. Currently set
+      to ngrok URL for dev — update to production URL before deploy.
+    - Missing env vars that caused issues during setup:
+      `OUTLOOK_TOKEN_ENCRYPTION_KEY` (32 bytes hex),
+      `OUTLOOK_CLIENT_STATE_SECRET` (32 bytes hex),
+      `NEXT_PUBLIC_APP_URL` (must be HTTPS — ngrok URL for dev).
+      Generate with:
+      `node -e 'console.log(require("crypto").randomBytes(32).toString("hex"))'`
 - [ ] PROMPT 09 — Market intelligence layer
 - [ ] PROMPT 10 — Archive + knowledge base
 - [ ] PROMPT 11 — Settings + company config

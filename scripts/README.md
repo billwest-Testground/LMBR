@@ -105,6 +105,10 @@ Both scripts exit 1 on failure, 0 on success. Option A can be wired into CI toda
 
 No automated smoke yet. Graph subscriptions need a publicly reachable HTTPS URL and a live Microsoft 365 mailbox, neither of which we mock. Exercise once per prompt touching `apps/web/src/app/api/webhook/outlook` or `packages/lib/src/outlook.ts`.
 
+**IMPORTANT — account type requirement:**
+
+Graph webhook subscriptions require a Microsoft 365 work/school account. Personal Microsoft accounts (outlook.com, hotmail.com, live.com) are not supported by Graph change notifications. Validation handshake confirmed working (validationToken 200 OK). Subscription creation code is correct — limitation is account type only. For local testing, sign up for a free M365 developer account at: https://developer.microsoft.com/microsoft-365/dev-program
+
 **Prerequisites:**
 
 - Dev server exposed at a public HTTPS URL (ngrok, Cloudflare Tunnel, or deployed preview).
