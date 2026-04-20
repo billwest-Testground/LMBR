@@ -18,6 +18,7 @@ import type { Metadata } from 'next';
 import { Inter, JetBrains_Mono } from 'next/font/google';
 import './globals.css';
 import { Providers } from './providers';
+import { THEME_BOOT_SCRIPT } from '../components/layout/theme-toggle';
 
 const inter = Inter({
   subsets: ['latin'],
@@ -44,7 +45,10 @@ export const metadata: Metadata = {
   metadataBase: new URL(
     process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000',
   ),
-  themeColor: '#0A0E0C',
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: '#F7F3EE' },
+    { media: '(prefers-color-scheme: dark)', color: '#0A0A0A' },
+  ],
 };
 
 export default function RootLayout({
@@ -55,9 +59,16 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`dark ${inter.variable} ${jetbrainsMono.variable}`}
+      className={`${inter.variable} ${jetbrainsMono.variable}`}
       suppressHydrationWarning
     >
+      <head>
+        {/* Applies stored dark/light theme before first paint. See
+            components/layout/theme-toggle.tsx for the full flow. */}
+        <script
+          dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }}
+        />
+      </head>
       <body className="min-h-screen bg-bg-base text-text-secondary font-sans antialiased">
         <Providers>{children}</Providers>
       </body>

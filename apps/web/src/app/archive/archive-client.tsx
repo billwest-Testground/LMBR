@@ -253,7 +253,7 @@ function ArchivedBidsTab() {
           <button
             type="button"
             onClick={() => setToast(null)}
-            className="rounded-sm p-1 hover:bg-white/5"
+            className="rounded-sm p-1 hover:bg-bg-elevated"
             aria-label="Dismiss"
           >
             <X className="h-4 w-4" aria-hidden="true" />

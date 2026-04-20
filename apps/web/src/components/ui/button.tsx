@@ -34,18 +34,21 @@ const BASE_CLASSES =
   'active:scale-[0.98] select-none whitespace-nowrap';
 
 const VARIANT_CLASSES: Record<ButtonVariant, string> = {
+  // Primary is the one button where teal lives. Text is a literal
+  // white (accent-on) in both modes — `text-text-inverse` would flip
+  // to cream in light mode, which looks wrong against teal.
   primary:
-    'bg-accent-primary text-text-inverse ' +
+    'bg-accent-primary text-accent-on ' +
     'hover:bg-accent-secondary active:bg-accent-tertiary',
   secondary:
     'bg-transparent border border-border-strong text-text-primary ' +
-    'hover:bg-bg-elevated',
+    'hover:bg-bg-subtle',
   ghost:
     'bg-transparent text-text-secondary ' +
-    'hover:bg-bg-subtle hover:text-text-primary',
+    'hover:bg-bg-elevated hover:text-text-primary',
   destructive:
     'bg-transparent border text-semantic-error ' +
-    'border-[rgba(232,84,72,0.4)] hover:bg-[rgba(232,84,72,0.12)]',
+    'border-[rgba(192,57,43,0.40)] hover:bg-[rgba(192,57,43,0.12)]',
   icon:
     'bg-transparent text-text-secondary rounded-sm ' +
     'hover:bg-bg-elevated hover:text-text-primary',

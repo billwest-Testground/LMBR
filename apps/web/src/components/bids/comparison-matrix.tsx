@@ -315,7 +315,7 @@ export function ComparisonMatrix({
         <div
           role="note"
           aria-label="Internal only — vendor names never appear on customer output"
-          className="inline-flex items-center gap-2 rounded-pill border border-[rgba(232,168,50,0.3)] bg-[rgba(232,168,50,0.1)] px-3 py-1 text-label uppercase text-semantic-warning"
+          className="inline-flex items-center gap-2 rounded-pill border border-[rgba(184,122,29,0.3)] bg-[rgba(184,122,29,0.1)] px-3 py-1 text-label uppercase text-semantic-warning"
         >
           <ShieldAlert className="h-3.5 w-3.5" aria-hidden="true" />
           Internal only — never shown to customer
@@ -625,7 +625,7 @@ const MatrixRow = React.memo(function MatrixRow({
               priced && cell.isBestPrice && !isSelected &&
                 'bg-[rgba(29,184,122,0.15)] text-accent-primary font-semibold ring-1 ring-inset ring-[rgba(29,184,122,0.3)] rounded-xs',
               priced && cell.isWorstPrice && !cell.isBestPrice && !isSelected &&
-                'bg-[rgba(232,84,72,0.05)] text-[rgba(232,84,72,0.7)]',
+                'bg-[rgba(192,57,43,0.05)] text-[rgba(192,57,43,0.7)]',
               // Selected tint
               isSelected &&
                 'bg-[rgba(143,212,74,0.12)] text-accent-warm ring-1 ring-inset ring-[rgba(143,212,74,0.4)] rounded-xs',
@@ -702,7 +702,7 @@ function RunningTotalBar({
         <span
           className={cn(
             'font-mono tabular-nums text-body',
-            savingsVsHighest > 0 ? 'text-accent-warm2' : 'text-text-secondary',
+            savingsVsHighest > 0 ? 'text-accent-primary' : 'text-text-secondary',
           )}
         >
           {USD.format(savingsVsHighest)}

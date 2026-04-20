@@ -84,7 +84,7 @@ interface StatusStyle {
 export const STATUS_STYLES: Record<VendorBidStatus, StatusStyle> = {
   pending: {
     ring: 'border-l-semantic-warning',
-    badgeBg: 'bg-[rgba(232,168,50,0.15)]',
+    badgeBg: 'bg-[rgba(184,122,29,0.15)]',
     badgeText: 'text-semantic-warning',
     label: 'pending',
   },
@@ -96,7 +96,7 @@ export const STATUS_STYLES: Record<VendorBidStatus, StatusStyle> = {
   },
   partial: {
     ring: 'border-l-semantic-info',
-    badgeBg: 'bg-[rgba(74,158,232,0.15)]',
+    badgeBg: 'bg-[rgba(45,111,163,0.15)]',
     badgeText: 'text-semantic-info',
     label: 'partial',
   },
@@ -108,7 +108,7 @@ export const STATUS_STYLES: Record<VendorBidStatus, StatusStyle> = {
   },
   expired: {
     ring: 'border-l-semantic-error',
-    badgeBg: 'bg-[rgba(232,84,72,0.15)]',
+    badgeBg: 'bg-[rgba(192,57,43,0.15)]',
     badgeText: 'text-semantic-error',
     label: 'expired',
   },

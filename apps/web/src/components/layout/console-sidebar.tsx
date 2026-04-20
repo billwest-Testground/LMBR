@@ -64,7 +64,7 @@ export function ConsoleSidebar() {
       >
         <span
           aria-hidden="true"
-          className="h-6 w-6 rounded-sm bg-gradient-brand shadow-accent"
+          className="h-6 w-6 rounded-sm bg-accent-primary"
         />
         <span className="text-h4 text-text-primary">
           LMBR<span className="text-accent-primary">.ai</span>

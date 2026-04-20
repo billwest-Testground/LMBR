@@ -1,15 +1,16 @@
 /**
  * Tailwind configuration — LMBR.ai web.
  *
- * Purpose:  Materializes the Worklighter/LMBR.ai UI/UX design system from
- *           README.md §13 as Tailwind tokens so every component, screen,
- *           and primitive can reference the same design language. Dark-
- *           first: the console is built against the near-black palette
- *           first and light mode, when it exists, is an inversion layer.
+ * Purpose:  Materializes the monochrome light-first design system from
+ *           README.md §1 as Tailwind tokens. Surface / border / text
+ *           tokens resolve through CSS variables so the same class
+ *           stays correct in both light mode (default) and dark mode
+ *           (`data-theme="dark"` on <html>). Worklighter accents are
+ *           hardcoded hex — they must NEVER reskin per theme; teal
+ *           and warm green are reserved for primary-action,
+ *           active-nav, and selected-cell states only.
  * Inputs:   content globs.
  * Outputs:  Tailwind `Config`.
- * Agent/API: none.
- * Imports:  tailwindcss type.
  *
  * LMBR.ai — Enterprise AI bid automation for wholesale lumber distributors.
  * Built by Worklighter.
@@ -18,7 +19,12 @@
 import type { Config } from 'tailwindcss';
 
 const config: Config = {
-  darkMode: 'class',
+  // Attribute-based toggle: ThemeToggle sets data-theme="dark" on
+  // <html>; `:root` carries light values by default. We don't use
+  // Tailwind's `dark:` variant because the surface/border/text tokens
+  // below are CSS-variable-backed — a single `bg-bg-surface` class is
+  // correct in both modes without a `dark:` sibling.
+  darkMode: ['selector', '[data-theme="dark"]'],
   content: [
     './src/**/*.{ts,tsx,js,jsx,mdx}',
     './src/app/**/*.{ts,tsx}',
@@ -28,35 +34,42 @@ const config: Config = {
     extend: {
       colors: {
         bg: {
-          base: '#0A0E0C',
-          surface: '#111714',
-          elevated: '#1A2120',
-          subtle: '#1F2A27',
+          base: 'var(--color-bg-base)',
+          surface: 'var(--color-bg-surface)',
+          elevated: 'var(--color-bg-elevated)',
+          subtle: 'var(--color-bg-subtle)',
+          inverse: 'var(--color-bg-inverse)',
         },
         border: {
-          base: '#1E2E29',
-          subtle: '#162420',
-          strong: '#2A4038',
+          base: 'var(--color-border-base)',
+          subtle: 'var(--color-border-subtle)',
+          strong: 'var(--color-border-strong)',
         },
+        text: {
+          primary: 'var(--color-text-primary)',
+          secondary: 'var(--color-text-secondary)',
+          tertiary: 'var(--color-text-tertiary)',
+          inverse: 'var(--color-text-inverse)',
+        },
+        // Worklighter accent — ALWAYS the same values in light + dark.
+        // Reserved for: primary buttons, active nav, selected states,
+        // input focus ring. Never use on text, borders, or surfaces
+        // beyond those narrow roles.
         accent: {
           primary: '#1DB87A',
           secondary: '#15926A',
           tertiary: '#0F6B4E',
           warm: '#8FD44A',
-          warm2: '#C8E86A',
-          glow: '#4AE89A',
+          on: '#FFFFFF',
         },
-        text: {
-          primary: '#F0EBE0',
-          secondary: '#A8B5AF',
-          tertiary: '#6B7C75',
-          inverse: '#0A0E0C',
-        },
+        // Semantic colors are sparingly used — monochrome-leaning hues
+        // from the same brand family. Error is red, info is blue, but
+        // the overall palette stays quiet.
         semantic: {
           success: '#1DB87A',
-          warning: '#E8A832',
-          error: '#E85448',
-          info: '#4A9EE8',
+          warning: '#B87A1D',
+          error: '#C0392B',
+          info: '#2D6FA3',
         },
       },
       fontFamily: {
@@ -103,22 +116,14 @@ const config: Config = {
         pill: '999px',
       },
       boxShadow: {
-        sm: '0 1px 3px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.04)',
-        md: '0 4px 16px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.05)',
-        lg: '0 8px 32px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.06)',
-        accent: '0 0 0 2px rgba(29, 184, 122, 0.35)',
-        warm: '0 0 0 2px rgba(143, 212, 74, 0.30)',
-        error: '0 0 0 2px rgba(232, 84, 72, 0.25)',
-      },
-      backgroundImage: {
-        'gradient-brand':
-          'linear-gradient(160deg, #C8E86A 0%, #1DB87A 45%, #0B7A5A 100%)',
-        'gradient-surface':
-          'linear-gradient(180deg, #111714 0%, #0D1210 100%)',
-        'gradient-accent':
-          'linear-gradient(135deg, rgba(29,184,122,0.12) 0%, rgba(29,184,122,0.03) 100%)',
-        'gradient-warm':
-          'linear-gradient(135deg, #8FD44A 0%, #E8A832 100%)',
+        // Shadows resolve via CSS variable so dark mode can swap to
+        // the near-zero variants defined in globals.css — in dark
+        // mode, borders carry the weight instead.
+        sm: 'var(--shadow-sm)',
+        md: 'var(--shadow-md)',
+        lg: 'var(--shadow-lg)',
+        accent: 'var(--shadow-accent)',
+        error: 'var(--shadow-error)',
       },
       transitionDuration: {
         micro: '100ms',

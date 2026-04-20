@@ -286,7 +286,7 @@ export function QuotePreviewClient({
       {serverError && (
         <div
           role="alert"
-          className="rounded-md border border-[rgba(232,84,72,0.4)] bg-[rgba(232,84,72,0.08)] px-3 py-2 text-body-sm text-semantic-error"
+          className="rounded-md border border-[rgba(192,57,43,0.4)] bg-[rgba(192,57,43,0.08)] px-3 py-2 text-body-sm text-semantic-error"
         >
           {serverError}
         </div>
@@ -295,7 +295,7 @@ export function QuotePreviewClient({
       {isDraft && (
         <div
           role="status"
-          className="rounded-md border border-[rgba(232,168,50,0.4)] bg-[rgba(232,168,50,0.08)] px-3 py-2 text-body-sm text-semantic-warning"
+          className="rounded-md border border-[rgba(184,122,29,0.4)] bg-[rgba(184,122,29,0.08)] px-3 py-2 text-body-sm text-semantic-warning"
         >
           This quote is a draft. Open the margin stack and submit for approval
           to unlock release.
@@ -431,7 +431,7 @@ const QUOTE_STATUS_STYLES: Record<
     text: 'text-text-secondary',
   },
   pending_approval: {
-    bg: 'bg-[rgba(232,168,50,0.15)]',
+    bg: 'bg-[rgba(184,122,29,0.15)]',
     text: 'text-semantic-warning',
   },
   approved: {
@@ -439,7 +439,7 @@ const QUOTE_STATUS_STYLES: Record<
     text: 'text-accent-primary',
   },
   sent: {
-    bg: 'bg-[rgba(74,158,232,0.15)]',
+    bg: 'bg-[rgba(45,111,163,0.15)]',
     text: 'text-semantic-info',
   },
   accepted: {
@@ -447,7 +447,7 @@ const QUOTE_STATUS_STYLES: Record<
     text: 'text-accent-primary',
   },
   declined: {
-    bg: 'bg-[rgba(232,84,72,0.15)]',
+    bg: 'bg-[rgba(192,57,43,0.15)]',
     text: 'text-semantic-error',
   },
 };

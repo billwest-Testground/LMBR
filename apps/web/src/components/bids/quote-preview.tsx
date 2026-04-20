@@ -44,7 +44,7 @@ export function QuotePreview({
       {hasWarnings && (
         <div
           role="alert"
-          className="flex items-start gap-2 rounded-md border border-[rgba(232,168,50,0.4)] bg-[rgba(232,168,50,0.08)] px-3 py-2 text-body-sm text-semantic-warning"
+          className="flex items-start gap-2 rounded-md border border-[rgba(184,122,29,0.4)] bg-[rgba(184,122,29,0.08)] px-3 py-2 text-body-sm text-semantic-warning"
         >
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
           <div>

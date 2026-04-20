@@ -2,10 +2,17 @@
  * StatusBadge — bid_status pill per README §7.
  *
  * Purpose:  Compact status indicator reused across every bid list,
- *           card, table, and detail header in the LMBR.ai console. The
- *           color tables come directly from README §7 — no custom
- *           branding creep because every pill in the console shares
- *           this single source of truth.
+ *           card, table, and detail header. Monochrome-first design:
+ *           every status renders as a neutral gray pill except
+ *           `approved` and `sent`, which earn the Worklighter teal
+ *           because they're positive terminal states worth
+ *           highlighting. `extracting` and `routing` keep a pulsing
+ *           status dot so traders can tell at a glance that a bid is
+ *           actively moving through the pipeline.
+ *
+ *           No color on the pill = design-system intent: color is a
+ *           signal, not decoration. If you find yourself adding a new
+ *           color here, ask whether the status really earns it.
  *
  * LMBR.ai — Enterprise AI bid automation for wholesale lumber distributors.
  * Built by Worklighter.
@@ -26,66 +33,32 @@ export type BidStatus =
   | 'sent'
   | 'archived';
 
+// Monochrome base — every neutral-flow status shares this.
+const NEUTRAL =
+  'border border-border-base bg-bg-subtle text-text-secondary';
+
+// Positive terminal state — teal-tinted. Used only for `approved` and
+// `sent` because those are the statuses a trader WANTS to see.
+const POSITIVE =
+  'border border-[rgba(29,184,122,0.35)] bg-[rgba(29,184,122,0.10)] text-accent-primary';
+
 interface StatusStyle {
-  bg: string;
-  text: string;
+  classes: string;
   label: string;
   pulse?: boolean;
 }
 
 const STATUS_STYLES: Record<BidStatus, StatusStyle> = {
-  received: {
-    bg: 'bg-[rgba(74,158,232,0.15)]',
-    text: 'text-semantic-info',
-    label: 'received',
-  },
-  extracting: {
-    bg: 'bg-[rgba(29,184,122,0.15)]',
-    text: 'text-accent-primary',
-    label: 'extracting',
-    pulse: true,
-  },
-  reviewing: {
-    bg: 'bg-[rgba(232,168,50,0.15)]',
-    text: 'text-semantic-warning',
-    label: 'reviewing',
-  },
-  routing: {
-    bg: 'bg-[rgba(143,212,74,0.15)]',
-    text: 'text-accent-warm',
-    label: 'routing',
-    pulse: true,
-  },
-  quoting: {
-    bg: 'bg-[rgba(29,184,122,0.15)]',
-    text: 'text-accent-primary',
-    label: 'quoting',
-  },
-  comparing: {
-    bg: 'bg-[rgba(143,212,74,0.15)]',
-    text: 'text-accent-warm',
-    label: 'comparing',
-  },
-  pricing: {
-    bg: 'bg-[rgba(232,168,50,0.15)]',
-    text: 'text-semantic-warning',
-    label: 'pricing',
-  },
-  approved: {
-    bg: 'bg-[rgba(29,184,122,0.15)]',
-    text: 'text-accent-primary',
-    label: 'approved',
-  },
-  sent: {
-    bg: 'bg-[rgba(74,158,232,0.15)]',
-    text: 'text-semantic-info',
-    label: 'sent',
-  },
-  archived: {
-    bg: 'bg-[rgba(107,124,117,0.15)]',
-    text: 'text-text-tertiary',
-    label: 'archived',
-  },
+  received: { classes: NEUTRAL, label: 'received' },
+  extracting: { classes: NEUTRAL, label: 'extracting', pulse: true },
+  reviewing: { classes: NEUTRAL, label: 'reviewing' },
+  routing: { classes: NEUTRAL, label: 'routing', pulse: true },
+  quoting: { classes: NEUTRAL, label: 'quoting' },
+  comparing: { classes: NEUTRAL, label: 'comparing' },
+  pricing: { classes: NEUTRAL, label: 'pricing' },
+  approved: { classes: POSITIVE, label: 'approved' },
+  sent: { classes: POSITIVE, label: 'sent' },
+  archived: { classes: NEUTRAL, label: 'archived' },
 };
 
 export interface StatusBadgeProps {
@@ -94,18 +67,17 @@ export interface StatusBadgeProps {
 }
 
 export function StatusBadge({ status, className }: StatusBadgeProps) {
-  const style = STATUS_STYLES[status as BidStatus] ?? {
-    bg: 'bg-bg-subtle',
-    text: 'text-text-tertiary',
-    label: status,
-    pulse: false,
-  };
+  const style =
+    STATUS_STYLES[status as BidStatus] ?? {
+      classes: NEUTRAL,
+      label: status,
+      pulse: false,
+    };
   return (
     <span
       className={cn(
         'inline-flex items-center gap-1.5 rounded-pill px-2 py-0.5 text-label uppercase',
-        style.bg,
-        style.text,
+        style.classes,
         className,
       )}
       aria-label={`Status: ${style.label}`}

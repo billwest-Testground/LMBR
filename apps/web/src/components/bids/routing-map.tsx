@@ -250,7 +250,7 @@ export function RoutingMap({
       {error && (
         <div
           role="alert"
-          className="rounded-sm border border-[rgba(232,84,72,0.4)] bg-[rgba(232,84,72,0.10)] px-3 py-2 text-body-sm text-semantic-error"
+          className="rounded-sm border border-[rgba(192,57,43,0.4)] bg-[rgba(192,57,43,0.10)] px-3 py-2 text-body-sm text-semantic-error"
         >
           {error}
         </div>
@@ -258,7 +258,7 @@ export function RoutingMap({
 
       {/* Unrouted bucket ---------------------------------------------------- */}
       {unroutedLineItems.length > 0 && (
-        <section className="rounded-md border border-[rgba(232,168,50,0.35)] bg-[rgba(232,168,50,0.06)] p-5 shadow-sm">
+        <section className="rounded-md border border-[rgba(184,122,29,0.35)] bg-[rgba(184,122,29,0.06)] p-5 shadow-sm">
           <div className="mb-3 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <AlertTriangle className="h-4 w-4 text-semantic-warning" aria-hidden="true" />
@@ -273,7 +273,7 @@ export function RoutingMap({
               <button
                 type="button"
                 onClick={selectAllUnrouted}
-                className="text-accent-primary hover:text-accent-glow"
+                className="text-accent-primary hover:text-accent-secondary"
               >
                 Select all
               </button>
@@ -282,7 +282,7 @@ export function RoutingMap({
                 type="button"
                 onClick={clearSelection}
                 disabled={selectedUnrouted.size === 0}
-                className="text-accent-primary hover:text-accent-glow disabled:opacity-40"
+                className="text-accent-primary hover:text-accent-secondary disabled:opacity-40"
               >
                 Clear
               </button>

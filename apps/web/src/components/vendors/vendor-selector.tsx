@@ -180,7 +180,7 @@ function MinOrderWarningBlock({
   return (
     <div
       role="alert"
-      className="mt-2 space-y-1 rounded-sm border border-semantic-warning/30 bg-[rgba(232,168,50,0.08)] p-2 text-caption text-semantic-warning"
+      className="mt-2 space-y-1 rounded-sm border border-semantic-warning/30 bg-[rgba(184,122,29,0.08)] p-2 text-caption text-semantic-warning"
     >
       {warnings.slice(0, 4).map((w) => (
         <div key={w.lineItemId} className="flex items-start gap-1.5">
@@ -421,7 +421,7 @@ export function VendorSelector({
 
   if (loadError) {
     return (
-      <div className="rounded-md border border-semantic-error/40 bg-[rgba(232,84,72,0.08)] p-4">
+      <div className="rounded-md border border-semantic-error/40 bg-[rgba(192,57,43,0.08)] p-4">
         <p className="text-body-sm text-semantic-error">{loadError}</p>
       </div>
     );
@@ -557,7 +557,7 @@ export function VendorSelector({
         {dispatchError && (
           <div
             role="alert"
-            className="mt-3 rounded-sm border border-semantic-error/40 bg-[rgba(232,84,72,0.08)] p-3 text-body-sm text-semantic-error"
+            className="mt-3 rounded-sm border border-semantic-error/40 bg-[rgba(192,57,43,0.08)] p-3 text-body-sm text-semantic-error"
           >
             {dispatchError}
           </div>

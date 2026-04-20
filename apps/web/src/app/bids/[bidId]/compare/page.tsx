@@ -165,7 +165,7 @@ function ErrorPanel({ message, bidId }: { message: string; bidId: string }) {
         </Link>
         <h1 className="mt-2 text-h1 text-text-primary">Comparison</h1>
       </header>
-      <div className="rounded-md border border-[rgba(232,84,72,0.4)] bg-[rgba(232,84,72,0.08)] px-6 py-5 text-body-sm text-semantic-error">
+      <div className="rounded-md border border-[rgba(192,57,43,0.4)] bg-[rgba(192,57,43,0.08)] px-6 py-5 text-body-sm text-semantic-error">
         Comparison failed to load: {message}
       </div>
     </div>

@@ -164,7 +164,7 @@ export function CompanyForm({ canEdit }: { canEdit: boolean }) {
   }
   if (loadError) {
     return (
-      <div className="rounded-sm border border-[rgba(232,84,72,0.4)] bg-[rgba(232,84,72,0.1)] p-4 text-body-sm text-semantic-error">
+      <div className="rounded-sm border border-[rgba(192,57,43,0.4)] bg-[rgba(192,57,43,0.1)] p-4 text-body-sm text-semantic-error">
         {loadError}
       </div>
     );

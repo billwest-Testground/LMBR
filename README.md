@@ -11,16 +11,28 @@
 ## Design Philosophy
 
 LMBR.ai is enterprise software sold at $10,000+/month to wholesale
-lumber distributors. The UI must feel like a professional trading
-tool — not a startup's side project. The aesthetic is:
+lumber distributors. The UI must feel like a professional financial
+terminal — Bloomberg, Linear, Figma — not a startup's side project.
 
-- Dark-first. The primary experience is on a near-black surface.
-  Light mode is available but dark is the default and primary.
-- Calm precision. High information density without visual noise.
+The aesthetic is:
+
+- **Light-first, monochrome.** The primary experience is on a warm
+  cream surface with near-black text. Dark mode is available via a
+  toggle stored in localStorage.
+- **Color is reserved.** Worklighter teal (#1DB87A) and warm green
+  (#8FD44A) are the ONLY non-monochrome colors in the product, and
+  they appear ONLY on:
+    - Primary-action buttons
+    - Active / selected nav items
+    - Active / selected state highlights (comparison-matrix cell,
+      consolidation mode selector, input focus ring)
+  Everything else is pure monochrome — grays only. Text, borders,
+  surfaces, status badges, and data tables do not carry color.
+- **Calm precision.** High information density without visual noise.
   Every element earns its place. Nothing decorative for its own sake.
-- Fast and confident. Transitions are subtle and quick. No
+- **Fast and confident.** Transitions are subtle and quick. No
   animations that slow the user down. Interactions feel immediate.
-- Industry credible. A lumber trader who has used Bloomberg
+- **Industry credible.** A lumber trader who has used Bloomberg
   terminals, ERP systems, and commodity trading dashboards should
   feel at home. Not intimidated by a consumer app.
 
@@ -28,61 +40,92 @@ tool — not a startup's side project. The aesthetic is:
 
 ## 1 — Brand Color Palette
 
-Derived from the Worklighter feather mark — yellow-green tip bleeding
-into rich teal, on near-black. This is the DNA of every screen.
+Monochrome light-first. Worklighter teal + warm green are reserved
+for the three narrow roles described in the Design Philosophy. The
+surface / border / text tokens resolve through CSS variables and
+swap values between light and dark modes — every component that
+references a token is correct in both modes without a `dark:` sibling.
 
-### Background Surfaces
+### Light Mode (default)
 
---color-bg-base:        #0A0E0C   /* near-black with green undertone — page background */
---color-bg-surface:     #111714   /* cards, panels, sidebar */
---color-bg-elevated:    #1A2120   /* modals, dropdowns, hover states */
---color-bg-subtle:      #1F2A27   /* table rows, input backgrounds */
+Backgrounds:
 
-### Borders
+--color-bg-base:        #F7F3EE   /* warm cream — page background */
+--color-bg-surface:     #FFFFFF   /* cards, panels, sidebar */
+--color-bg-elevated:    #F0EBE3   /* modals, dropdowns, hover */
+--color-bg-subtle:      #E8E2DA   /* table rows, input backgrounds */
+--color-bg-inverse:     #0F0F0F   /* inverse surfaces */
 
---color-border-base:    #1E2E29   /* default borders */
---color-border-subtle:  #162420   /* dividers, separators */
---color-border-strong:  #2A4038   /* focused elements, active states */
+Borders:
 
-### Accent — Teal (Primary Actions)
+--color-border-base:    #D4CEC6   /* default */
+--color-border-subtle:  #E2DDD8   /* dividers, separators */
+--color-border-strong:  #B8B0A6   /* focused, active */
 
---color-accent-primary:   #1DB87A   /* primary actions, links, active states, success */
+Text:
+
+--color-text-primary:   #0F0F0F   /* near-black — headings, primary */
+--color-text-secondary: #4A4540   /* body text, labels */
+--color-text-tertiary:  #8C8480   /* muted — placeholders, disabled */
+--color-text-inverse:   #F7F3EE   /* text on dark / accent backgrounds */
+
+### Dark Mode (toggle — `data-theme="dark"` on `<html>`)
+
+Backgrounds:
+
+--color-bg-base:        #0A0A0A
+--color-bg-surface:     #141414
+--color-bg-elevated:    #1C1C1C
+--color-bg-subtle:      #242424
+--color-bg-inverse:     #F7F3EE
+
+Borders:
+
+--color-border-base:    #2A2A2A
+--color-border-subtle:  #1E1E1E
+--color-border-strong:  #3A3A3A
+
+Text:
+
+--color-text-primary:   #F5F5F5
+--color-text-secondary: #A8A8A8
+--color-text-tertiary:  #666666
+--color-text-inverse:   #0A0A0A
+
+### Accent — Worklighter Brand (same values in BOTH modes)
+
+ONLY used on: primary buttons, active nav items, selected states,
+input focus ring. Never on body text. Never on borders. Never on
+surfaces beyond those narrow roles.
+
+--color-accent-primary:   #1DB87A   /* teal — primary actions */
 --color-accent-secondary: #15926A   /* hover on primary */
---color-accent-tertiary:  #0F6B4E   /* pressed states */
---color-accent-glow:      #4AE89A   /* notifications, new items, live indicators */
+--color-accent-tertiary:  #0F6B4E   /* pressed */
+--color-accent-warm:      #8FD44A   /* warm green — recommended only */
+--color-accent-on:        #FFFFFF   /* text on accent buttons */
 
-### Accent — Warm Green (Highlights, Attention)
+### Semantic (monochrome-leaning — both modes)
 
---color-accent-warm:    #8FD44A   /* highlights, badges, recommended states */
---color-accent-warm-2:  #C8E86A   /* success states, positive trends */
+--color-semantic-success: #1DB87A   /* use sparingly — only confirmed */
+--color-semantic-warning: #B87A1D   /* amber — same hue family */
+--color-semantic-error:   #C0392B   /* red */
+--color-semantic-info:    #2D6FA3   /* blue */
 
-### Text
+### Theme Toggle
 
---color-text-primary:   #F0EBE0   /* warm off-white — primary text, headings */
---color-text-secondary: #A8B5AF   /* muted — labels, body text, metadata */
---color-text-tertiary:  #6B7C75   /* very muted — placeholders, disabled */
---color-text-inverse:   #0A0E0C   /* text on light/accent backgrounds */
-
-### Semantic
-
---color-semantic-success: #1DB87A
---color-semantic-warning: #E8A832
---color-semantic-error:   #E85448
---color-semantic-info:    #4A9EE8
+A sun / moon icon button sits in the top-right of the console
+topbar (`apps/web/src/components/layout/theme-toggle.tsx`). Clicking
+it flips `data-theme="dark"` on `document.documentElement` and
+persists the choice in `localStorage['lmbr-theme']`. A tiny inline
+script in `app/layout.tsx` applies the stored value before first
+paint so a dark-mode user never sees a light-mode flash.
 
 ### Gradients
 
-/* Worklighter brand — use for marks and key highlights only */
---gradient-brand: linear-gradient(160deg, #C8E86A 0%, #1DB87A 45%, #0B7A5A 100%);
-
-/* Surface depth — sidebar, panels */
---gradient-surface: linear-gradient(180deg, #111714 0%, #0D1210 100%);
-
-/* Accent glow — active states, feature callouts */
---gradient-accent: linear-gradient(135deg, #1DB87A20 0%, #1DB87A08 100%);
-
-/* Warm — warnings, pricing states */
---gradient-warm: linear-gradient(135deg, #8FD44A 0%, #E8A832 100%);
+**Removed.** The previous brand / surface / accent / warm gradients
+violated the monochrome rule. Surfaces use flat backgrounds; emphasis
+comes from stronger borders (`--color-border-strong`) and from the
+`bg-bg-elevated` tier, not from gradient fills.
 
 ---
 
@@ -154,22 +197,26 @@ Base unit: 4px. All spacing is a multiple of 4.
 
 ## 4 — Elevation + Shadows
 
-Dark backgrounds use inner glow and border contrast rather than drop shadows.
+Shadows resolve through CSS variables so dark mode can neutralize
+them — in light mode, a soft drop shadow conveys card lift; in dark
+mode, borders carry the weight.
 
-/* Subtle surface lift */
---shadow-sm: 0 1px 3px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.04);
+Light mode:
 
-/* Card elevation */
---shadow-md: 0 4px 16px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.05);
+--shadow-sm: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+--shadow-md: 0 4px 12px rgba(0,0,0,0.08), 0 1px 3px rgba(0,0,0,0.05);
+--shadow-lg: 0 12px 28px rgba(0,0,0,0.10), 0 2px 6px rgba(0,0,0,0.06);
 
-/* Modal / dropdown */
---shadow-lg: 0 8px 32px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.06);
+Dark mode (minimal — borders do the work):
 
-/* Accent glow — active, focused */
---shadow-accent: 0 0 0 2px rgba(29, 184, 122, 0.35);
+--shadow-sm: 0 0 0 1px rgba(255,255,255,0.03);
+--shadow-md: 0 0 0 1px rgba(255,255,255,0.04);
+--shadow-lg: 0 0 0 1px rgba(255,255,255,0.05);
 
-/* Warm glow — warnings, pricing highlights */
---shadow-warm: 0 0 0 2px rgba(143, 212, 74, 0.30);
+Accent + error focus rings (both modes):
+
+--shadow-accent: 0 0 0 3px rgba(29, 184, 122, 0.18);  /* 0.25 in dark */
+--shadow-error:  0 0 0 3px rgba(192, 57, 43, 0.18);   /* 0.25 in dark */
 
 ---
 
@@ -177,9 +224,10 @@ Dark backgrounds use inner glow and border contrast rather than drop shadows.
 
 ### Buttons
 
-Primary Button
+Primary Button (the only place teal appears on buttons)
   Background:   --color-accent-primary (#1DB87A)
-  Text:         --color-text-inverse (#0A0E0C)
+  Text:         --color-accent-on (#FFFFFF)
+  Border:       none
   Font:         14px / weight 500
   Height:       36px
   Padding:      0 16px
@@ -193,31 +241,31 @@ Secondary Button
   Background:   transparent
   Border:       1px solid --color-border-strong
   Text:         --color-text-primary
-  Hover:        background --color-bg-elevated
+  Hover:        background --color-bg-subtle
   Active:       scale(0.98)
 
 Ghost Button
   Background:   transparent
   Border:       none
   Text:         --color-text-secondary
-  Hover:        text --color-text-primary + bg --color-bg-subtle
+  Hover:        text --color-text-primary + bg --color-bg-elevated
 
 Destructive Button
   Background:   transparent
-  Border:       1px solid rgba(232, 84, 72, 0.4)
+  Border:       1px solid rgba(192, 57, 43, 0.40)
   Text:         --color-semantic-error
-  Hover:        background rgba(232, 84, 72, 0.12)
+  Hover:        background rgba(192, 57, 43, 0.12)
 
 Icon Button
-  Size:         32px x 32px
+  Size:         36px x 36px
   Radius:       6px
   Background:   transparent
   Hover:        --color-bg-elevated
 
 ### Inputs
 
-Text Input
-  Background:   --color-bg-subtle
+Text Input (the one input exception — focus ring is teal)
+  Background:   --color-bg-surface
   Border:       1px solid --color-border-base
   Text:         --color-text-primary
   Placeholder:  --color-text-tertiary
@@ -227,13 +275,12 @@ Text Input
   Font:         14px / weight 400
 
   Focus:
-    Border:     1px solid --color-accent-primary
-    Shadow:     --shadow-accent
-    Background: --color-bg-elevated
+    Border:     1px solid #1DB87A
+    Shadow:     0 0 0 3px rgba(29, 184, 122, 0.12)
 
   Error:
     Border:     1px solid --color-semantic-error
-    Shadow:     0 0 0 2px rgba(232, 84, 72, 0.25)
+    Shadow:     --shadow-error
 
 Price Input (used throughout comparison matrix and margin stack)
   Same as text input PLUS:
@@ -269,7 +316,7 @@ Standard Card
   Border:     1px solid --color-border-base
   Radius:     8px
   Padding:    20px
-  Shadow:     --shadow-sm
+  Shadow:     --shadow-sm (dark mode: near-zero; borders carry weight)
 
   Hover (interactive cards):
     Border:     1px solid --color-border-strong
@@ -277,10 +324,13 @@ Standard Card
     Transition: 150ms ease
 
 Feature Card (highlighted — active bid, best price)
-  Background: linear-gradient(135deg, rgba(29,184,122,0.08) 0%, rgba(29,184,122,0.03) 100%)
-  Border:     1px solid rgba(29, 184, 122, 0.25)
+  Background: --color-bg-elevated
+  Border:     1px solid --color-border-strong
   Radius:     8px
   Padding:    20px
+
+  Note: monochrome. Previous gradient + teal-tinted border removed.
+  Emphasis now comes from the bolder border + elevated surface.
 
 Stat Card (metric display — dashboard, summary panels)
   Background: --color-bg-surface
@@ -289,8 +339,8 @@ Stat Card (metric display — dashboard, summary panels)
   Padding:    16px 20px
   Label:      12px / UPPERCASE / tracking 0.04em / --color-text-tertiary
   Value:      28px / weight 600 / --color-text-primary / tabular-nums
-  Trend up:   --color-accent-warm + up arrow icon
-  Trend down: --color-semantic-error + down arrow icon
+  Trend up:   --color-text-secondary + up arrow icon (monochrome)
+  Trend down: --color-text-secondary + down arrow icon (monochrome)
 
 ### Sidebar Navigation
 
@@ -308,13 +358,16 @@ Nav Item:
   Gap:         10px between icon and label
 
   Hover:       background --color-bg-elevated + text --color-text-primary
-  Active:      background rgba(29,184,122,0.12) + text --color-accent-primary
+
+  Active (the only place teal appears in nav):
+               background rgba(29,184,122,0.08)
+               text --color-accent-primary
                icon --color-accent-primary
-               border-left: 2px solid --color-accent-primary
+               border-left: 2px solid #1DB87A
 
 Badge on nav item (pending count):
   Background:  --color-accent-primary
-  Text:        --color-text-inverse
+  Text:        --color-accent-on (#FFFFFF)
   Height:      18px
   Min-width:   18px
   Radius:      999px
@@ -453,26 +506,32 @@ Inline edit mode:
 
 ## 7 — Status Badges
 
-All badges: pill shape (radius 999px)
+Monochrome by default. The previous colored status badges (blue for
+received, green for approved, amber for reviewing, etc.) have been
+replaced with a single neutral gray pill. Exceptions: `approved` and
+`sent` earn the Worklighter teal — they are positive terminal states
+worth highlighting. `extracting` and `routing` keep a pulsing dot
+so traders can tell at a glance that a bid is moving.
+
+Shape: pill (radius 999px)
 Font: 11px / weight 500 / UPPERCASE / tracking 0.04em
 Padding: 3px 8px
 
-Bid Status:
-  received:         bg rgba(74,158,232,0.15)   text #4A9EE8
-  extracting:       bg rgba(29,184,122,0.15)   text #1DB87A  + pulse dot
-  reviewing:        bg rgba(232,168,50,0.15)   text #E8A832
-  routing:          bg rgba(143,212,74,0.15)   text #8FD44A
-  quoting:          bg rgba(29,184,122,0.15)   text #1DB87A
-  comparing:        bg rgba(143,212,74,0.15)   text #8FD44A
-  pricing:          bg rgba(232,168,50,0.15)   text #E8A832
-  pending_approval: bg rgba(232,168,50,0.15)   text #E8A832
-  approved:         bg rgba(29,184,122,0.15)   text #1DB87A
-  sent:             bg rgba(74,158,232,0.15)   text #4A9EE8
-  archived:         bg rgba(107,124,117,0.15)  text #6B7C75
+Neutral (every status except approved / sent):
+  Background: --color-bg-subtle
+  Border:     1px solid --color-border-base
+  Text:       --color-text-secondary
+  Pulse dot:  only on `extracting` and `routing`
 
-Confidence Scores:
-  high   (> 0.90):      dot + text --color-accent-primary
-  medium (0.75 - 0.90): dot + text --color-semantic-warning
+Positive terminal states — `approved` and `sent`:
+  Background: rgba(29,184,122,0.10)
+  Border:     1px solid rgba(29,184,122,0.35)
+  Text:       --color-accent-primary
+
+Confidence Scores (still color-signaled — data-integrity signal,
+not decoration):
+  high   (≥ 0.92):      dot + text --color-accent-primary
+  medium (0.75 – 0.92): dot + text --color-semantic-warning
   low    (< 0.75):      dot + text --color-semantic-error
 
 ---

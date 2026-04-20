@@ -972,7 +972,7 @@ function StatusBadge({
     warning:
       'bg-[rgba(232,172,72,0.12)] text-semantic-warning border-[rgba(232,172,72,0.3)]',
     error:
-      'bg-[rgba(232,84,72,0.12)] text-semantic-error border-[rgba(232,84,72,0.3)]',
+      'bg-[rgba(192,57,43,0.12)] text-semantic-error border-[rgba(192,57,43,0.3)]',
     neutral: 'bg-bg-subtle text-text-tertiary border-border-subtle',
     accent:
       'bg-[rgba(29,184,122,0.08)] text-accent-primary border-[rgba(29,184,122,0.3)]',
@@ -1099,7 +1099,7 @@ function Banner({
   const tone =
     banner.kind === 'success'
       ? 'border-[rgba(29,184,122,0.3)] bg-[rgba(29,184,122,0.08)] text-semantic-success'
-      : 'border-[rgba(232,84,72,0.3)] bg-[rgba(232,84,72,0.08)] text-semantic-error';
+      : 'border-[rgba(192,57,43,0.3)] bg-[rgba(192,57,43,0.08)] text-semantic-error';
   return (
     <div
       className={cn(
@@ -1111,7 +1111,7 @@ function Banner({
       <button
         type="button"
         onClick={onDismiss}
-        className="rounded-sm p-1 hover:bg-white/5"
+        className="rounded-sm p-1 hover:bg-bg-elevated"
         aria-label="Dismiss"
       >
         <X className="h-4 w-4" aria-hidden="true" />

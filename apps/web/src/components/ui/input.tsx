@@ -22,11 +22,11 @@ import * as React from 'react';
 import { cn } from '../../lib/cn';
 
 const INPUT_BASE =
-  'block w-full h-9 px-3 rounded-sm bg-bg-subtle border border-border-base ' +
+  'block w-full h-9 px-3 rounded-sm bg-bg-surface border border-border-base ' +
   'text-text-primary placeholder:text-text-tertiary ' +
   'text-body font-sans ' +
   'transition-[background-color,border-color,box-shadow] duration-micro ' +
-  'focus:outline-none focus:border-accent-primary focus:bg-bg-elevated focus:shadow-accent ' +
+  'focus:outline-none focus:border-accent-primary focus:shadow-accent ' +
   'disabled:opacity-40 disabled:pointer-events-none ' +
   'aria-[invalid=true]:border-semantic-error aria-[invalid=true]:shadow-error';
 

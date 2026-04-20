@@ -366,7 +366,7 @@ export function BidUploader({ onIngested }: BidUploaderProps) {
               isDragActive
                 ? 'border-accent-primary bg-[rgba(29,184,122,0.06)]'
                 : 'border-border-base bg-bg-subtle hover:border-border-strong hover:bg-bg-elevated',
-              isDragReject && 'border-semantic-error bg-[rgba(232,84,72,0.08)]',
+              isDragReject && 'border-semantic-error bg-[rgba(192,57,43,0.08)]',
               loading && 'pointer-events-none opacity-60',
             )}
           >
@@ -422,7 +422,7 @@ export function BidUploader({ onIngested }: BidUploaderProps) {
         <div
           role="status"
           aria-live="polite"
-          className="flex items-center gap-3 rounded-sm border border-border-base bg-gradient-accent px-4 py-3"
+          className="flex items-center gap-3 rounded-sm border border-[rgba(29,184,122,0.25)] bg-[rgba(29,184,122,0.06)] px-4 py-3"
         >
           <span className="loading-dots">
             <span />
@@ -460,7 +460,7 @@ export function BidUploader({ onIngested }: BidUploaderProps) {
       {error && (
         <div
           role="alert"
-          className="rounded-sm border border-[rgba(232,84,72,0.4)] bg-[rgba(232,84,72,0.10)] px-3 py-2 text-body-sm text-semantic-error"
+          className="rounded-sm border border-[rgba(192,57,43,0.4)] bg-[rgba(192,57,43,0.10)] px-3 py-2 text-body-sm text-semantic-error"
         >
           {error}
         </div>

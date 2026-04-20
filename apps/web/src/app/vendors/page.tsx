@@ -85,7 +85,7 @@ export default function VendorsIndexPage() {
       </header>
 
       {error && (
-        <div className="rounded-md border border-semantic-error/40 bg-[rgba(232,84,72,0.08)] p-4">
+        <div className="rounded-md border border-semantic-error/40 bg-[rgba(192,57,43,0.08)] p-4">
           <p className="text-body-sm text-semantic-error">{error}</p>
         </div>
       )}

@@ -254,7 +254,7 @@ function LoginPageInner() {
                   disabled={!!loading}
                   className={cn(
                     'text-caption text-accent-primary transition-colors duration-micro',
-                    'hover:text-accent-glow disabled:opacity-40',
+                    'hover:text-accent-secondary disabled:opacity-40',
                   )}
                 >
                   {isLoadingMagic ? 'Sending…' : 'Email me a magic link'}
@@ -277,7 +277,7 @@ function LoginPageInner() {
           {error && (
             <div
               role="alert"
-              className="rounded-sm border border-[rgba(232,84,72,0.4)] bg-[rgba(232,84,72,0.10)] px-3 py-2 text-body-sm text-semantic-error"
+              className="rounded-sm border border-[rgba(192,57,43,0.4)] bg-[rgba(192,57,43,0.10)] px-3 py-2 text-body-sm text-semantic-error"
             >
               {error}
             </div>
@@ -286,7 +286,7 @@ function LoginPageInner() {
           {notice && (
             <div
               role="status"
-              className="rounded-sm border border-[rgba(74,158,232,0.35)] bg-[rgba(74,158,232,0.10)] px-3 py-2 text-body-sm text-semantic-info"
+              className="rounded-sm border border-[rgba(45,111,163,0.35)] bg-[rgba(45,111,163,0.10)] px-3 py-2 text-body-sm text-semantic-info"
             >
               {notice}
             </div>
@@ -309,7 +309,7 @@ function LoginPageInner() {
                 setError(null);
                 setNotice(null);
               }}
-              className="text-accent-primary transition-colors duration-micro hover:text-accent-glow"
+              className="text-accent-primary transition-colors duration-micro hover:text-accent-secondary"
             >
               Sign in
             </button>
@@ -324,7 +324,7 @@ function LoginPageInner() {
                 setError(null);
                 setNotice(null);
               }}
-              className="text-accent-primary transition-colors duration-micro hover:text-accent-glow"
+              className="text-accent-primary transition-colors duration-micro hover:text-accent-secondary"
             >
               Create a company account
             </button>

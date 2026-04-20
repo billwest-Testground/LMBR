@@ -269,7 +269,7 @@ export function SubmitForm({
       {error && (
         <div
           role="alert"
-          className="mb-4 rounded-md border border-[rgba(232,84,72,0.4)] bg-[rgba(232,84,72,0.10)] px-4 py-3 text-body-sm text-semantic-error"
+          className="mb-4 rounded-md border border-[rgba(192,57,43,0.4)] bg-[rgba(192,57,43,0.10)] px-4 py-3 text-body-sm text-semantic-error"
         >
           {error}
         </div>

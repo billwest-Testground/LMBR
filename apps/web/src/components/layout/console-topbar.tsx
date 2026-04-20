@@ -23,6 +23,7 @@ import { LogOut, Bell } from 'lucide-react';
 
 import { getSupabaseBrowserClient } from '../../lib/supabase/browser';
 import { Button } from '../ui/button';
+import { ThemeToggle } from './theme-toggle';
 
 const ROLE_LABELS: Record<string, string> = {
   trader: 'Trader',
@@ -90,6 +91,7 @@ export function ConsoleTopbar({
       </nav>
 
       <div className="flex items-center gap-3">
+        <ThemeToggle />
         <button
           type="button"
           aria-label="Notifications"

@@ -1,10 +1,18 @@
 /*
  * LMBR.ai global stylesheet.
  *
- * Purpose:  Loads Tailwind layers, publishes the LMBR.ai design-system
- *           CSS variables (README §1–§4), and wires dark-first base
- *           defaults on <html>/<body>. Every visual decision downstream
- *           should reference these tokens instead of hard-coded colors.
+ * Purpose:  Publishes the monochrome light-first design-system CSS
+ *           variables (README §1). Light mode is the default — dark
+ *           mode activates when `data-theme="dark"` is set on
+ *           document.documentElement (wired by the ThemeToggle client
+ *           component in components/layout/theme-toggle.tsx).
+ *
+ *           Worklighter teal / warm green are deliberately NOT exposed
+ *           as CSS variables — they are used only on primary-action
+ *           buttons, active-nav states, and selected-cell states, so
+ *           components reference the literal `#1DB87A` / `#8FD44A`
+ *           through Tailwind tokens rather than through a variable
+ *           that could drift.
  *
  * LMBR.ai — Enterprise AI bid automation for wholesale lumber distributors.
  * Built by Worklighter.
@@ -15,43 +23,64 @@
 @tailwind utilities;
 
 :root {
-  /* Background surfaces — README §1 */
-  --color-bg-base: #0A0E0C;
-  --color-bg-surface: #111714;
-  --color-bg-elevated: #1A2120;
-  --color-bg-subtle: #1F2A27;
+  /* ── Light mode (default) ───────────────────────────────── */
+  /* Background surfaces */
+  --color-bg-base: #F7F3EE;
+  --color-bg-surface: #FFFFFF;
+  --color-bg-elevated: #F0EBE3;
+  --color-bg-subtle: #E8E2DA;
+  --color-bg-inverse: #0F0F0F;
 
   /* Borders */
-  --color-border-base: #1E2E29;
-  --color-border-subtle: #162420;
-  --color-border-strong: #2A4038;
-
-  /* Accents */
-  --color-accent-primary: #1DB87A;
-  --color-accent-secondary: #15926A;
-  --color-accent-tertiary: #0F6B4E;
-  --color-accent-glow: #4AE89A;
-  --color-accent-warm: #8FD44A;
-  --color-accent-warm-2: #C8E86A;
+  --color-border-base: #D4CEC6;
+  --color-border-subtle: #E2DDD8;
+  --color-border-strong: #B8B0A6;
 
   /* Text */
-  --color-text-primary: #F0EBE0;
-  --color-text-secondary: #A8B5AF;
-  --color-text-tertiary: #6B7C75;
-  --color-text-inverse: #0A0E0C;
+  --color-text-primary: #0F0F0F;
+  --color-text-secondary: #4A4540;
+  --color-text-tertiary: #8C8480;
+  --color-text-inverse: #F7F3EE;
 
-  /* Semantic */
+  /* Semantic (monochrome-leaning) */
   --color-semantic-success: #1DB87A;
-  --color-semantic-warning: #E8A832;
-  --color-semantic-error: #E85448;
-  --color-semantic-info: #4A9EE8;
+  --color-semantic-warning: #B87A1D;
+  --color-semantic-error: #C0392B;
+  --color-semantic-info: #2D6FA3;
 
-  /* Elevation */
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.04);
-  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.05);
-  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.06);
-  --shadow-accent: 0 0 0 2px rgba(29, 184, 122, 0.35);
-  --shadow-warm: 0 0 0 2px rgba(143, 212, 74, 0.30);
+  /* Elevation — light-mode shadows only. Dark mode leans on borders. */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.05);
+  --shadow-lg: 0 12px 28px rgba(0, 0, 0, 0.10), 0 2px 6px rgba(0, 0, 0, 0.06);
+  --shadow-accent: 0 0 0 3px rgba(29, 184, 122, 0.18);
+  --shadow-error: 0 0 0 3px rgba(192, 57, 43, 0.18);
+}
+
+[data-theme='dark'] {
+  /* Background surfaces */
+  --color-bg-base: #0A0A0A;
+  --color-bg-surface: #141414;
+  --color-bg-elevated: #1C1C1C;
+  --color-bg-subtle: #242424;
+  --color-bg-inverse: #F7F3EE;
+
+  /* Borders */
+  --color-border-base: #2A2A2A;
+  --color-border-subtle: #1E1E1E;
+  --color-border-strong: #3A3A3A;
+
+  /* Text */
+  --color-text-primary: #F5F5F5;
+  --color-text-secondary: #A8A8A8;
+  --color-text-tertiary: #666666;
+  --color-text-inverse: #0A0A0A;
+
+  /* Borders carry the weight in dark mode — shadows kept minimal. */
+  --shadow-sm: 0 0 0 1px rgba(255, 255, 255, 0.03);
+  --shadow-md: 0 0 0 1px rgba(255, 255, 255, 0.04);
+  --shadow-lg: 0 0 0 1px rgba(255, 255, 255, 0.05);
+  --shadow-accent: 0 0 0 3px rgba(29, 184, 122, 0.25);
+  --shadow-error: 0 0 0 3px rgba(192, 57, 43, 0.25);
 }
 
 @layer base {
@@ -78,11 +107,11 @@
   }
 
   ::selection {
-    background: rgba(29, 184, 122, 0.32);
+    background: rgba(29, 184, 122, 0.20);
     color: var(--color-text-primary);
   }
 
-  /* Autofill in dark mode — keep the bg-subtle tone instead of WebKit yellow. */
+  /* Autofill — keep the bg-subtle tone instead of WebKit yellow. */
   input:-webkit-autofill,
   input:-webkit-autofill:hover,
   input:-webkit-autofill:focus {
@@ -105,7 +134,7 @@
 
 @layer components {
   /*
-   * Status dot — colored pulse next to "extracting", "running QA", etc.
+   * Status dot — small animated dot next to in-progress badges.
    * Used inside status badges per README §7.
    */
   .status-dot {

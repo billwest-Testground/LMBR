@@ -616,7 +616,7 @@ export function MarginStack({
         <div
           role="note"
           aria-label="Internal only — vendor costs and margin percent never appear on the customer PDF"
-          className="inline-flex items-center gap-2 rounded-pill border border-[rgba(232,168,50,0.3)] bg-[rgba(232,168,50,0.1)] px-3 py-1 text-label uppercase text-semantic-warning"
+          className="inline-flex items-center gap-2 rounded-pill border border-[rgba(184,122,29,0.3)] bg-[rgba(184,122,29,0.1)] px-3 py-1 text-label uppercase text-semantic-warning"
         >
           <ShieldAlert className="h-3.5 w-3.5" aria-hidden="true" />
           Internal only — costs + vendor context
@@ -827,7 +827,7 @@ export function MarginStack({
           {preview.unresolvedLineItemIds.length > 0 && (
             <div
               role="alert"
-              className="rounded-sm border border-[rgba(232,84,72,0.4)] bg-[rgba(232,84,72,0.08)] px-3 py-2 text-caption text-semantic-error"
+              className="rounded-sm border border-[rgba(192,57,43,0.4)] bg-[rgba(192,57,43,0.08)] px-3 py-2 text-caption text-semantic-error"
             >
               {preview.unresolvedLineItemIds.length} line
               {preview.unresolvedLineItemIds.length === 1 ? '' : 's'} without a
@@ -839,7 +839,7 @@ export function MarginStack({
           {grandAboveThreshold && (
             <div
               role="status"
-              className="inline-flex items-center gap-2 rounded-sm border border-[rgba(232,168,50,0.4)] bg-[rgba(232,168,50,0.1)] px-3 py-2 text-caption text-semantic-warning"
+              className="inline-flex items-center gap-2 rounded-sm border border-[rgba(184,122,29,0.4)] bg-[rgba(184,122,29,0.1)] px-3 py-2 text-caption text-semantic-warning"
             >
               <ShieldAlert className="h-4 w-4" aria-hidden="true" />
               Above {USD_COMPACT.format(settings.approvalThresholdDollars)} —
@@ -850,7 +850,7 @@ export function MarginStack({
           {serverError && (
             <div
               role="alert"
-              className="rounded-sm border border-[rgba(232,84,72,0.4)] bg-[rgba(232,84,72,0.08)] px-3 py-2 text-caption text-semantic-error"
+              className="rounded-sm border border-[rgba(192,57,43,0.4)] bg-[rgba(192,57,43,0.08)] px-3 py-2 text-caption text-semantic-error"
             >
               {serverError}
             </div>
@@ -967,7 +967,7 @@ function TotalsSourceChip({
   if (source === 'dirty') {
     return (
       <span
-        className="inline-flex items-center gap-1 rounded-pill border border-[rgba(232,168,50,0.4)] bg-[rgba(232,168,50,0.1)] px-2 py-0.5 text-label uppercase text-semantic-warning"
+        className="inline-flex items-center gap-1 rounded-pill border border-[rgba(184,122,29,0.4)] bg-[rgba(184,122,29,0.1)] px-2 py-0.5 text-label uppercase text-semantic-warning"
         aria-label="Margin edited after save — totals below are re-estimated client-side; save to refresh"
       >
         <AlertTriangle className="h-3 w-3" aria-hidden="true" />
@@ -1053,8 +1053,8 @@ function HealthIndicator({
     tier === 'ok'
       ? 'bg-[rgba(29,184,122,0.08)] border-[rgba(29,184,122,0.35)]'
       : tier === 'warn'
-        ? 'bg-[rgba(232,168,50,0.08)] border-[rgba(232,168,50,0.4)]'
-        : 'bg-[rgba(232,84,72,0.08)] border-[rgba(232,84,72,0.4)]';
+        ? 'bg-[rgba(184,122,29,0.08)] border-[rgba(184,122,29,0.4)]'
+        : 'bg-[rgba(192,57,43,0.08)] border-[rgba(192,57,43,0.4)]';
   return (
     <div
       role="status"
@@ -1298,7 +1298,7 @@ const MarginLineRow = React.memo(function MarginLineRow({
       className={cn(
         'group transition-colors duration-micro hover:bg-bg-subtle',
         belowFloor && 'border-l-[3px] border-l-semantic-error',
-        unresolved && 'bg-[rgba(232,84,72,0.04)]',
+        unresolved && 'bg-[rgba(192,57,43,0.04)]',
       )}
     >
       <td className="border-b border-border-subtle px-3 py-2">

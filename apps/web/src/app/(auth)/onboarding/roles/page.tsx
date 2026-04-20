@@ -144,8 +144,8 @@ export default function OnboardingRolesPage() {
               key={row.localId}
               className={cn(
                 'grid grid-cols-1 items-start gap-3 rounded-sm border border-border-base bg-bg-subtle p-3 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1.6fr)_minmax(0,1.6fr)_auto]',
-                row.status === 'sent' && 'border-[rgba(29,184,122,0.35)] bg-gradient-accent',
-                row.status === 'error' && 'border-[rgba(232,84,72,0.45)]',
+                row.status === 'sent' && 'border-[rgba(29,184,122,0.35)] bg-[rgba(29,184,122,0.08)]',
+                row.status === 'error' && 'border-[rgba(192,57,43,0.45)]',
               )}
             >
               <div>

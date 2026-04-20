@@ -245,7 +245,7 @@ export function TeamClient({
           <h2 className="text-h3 text-text-primary">Teammates</h2>
         </div>
         {loadError && (
-          <div className="m-5 rounded-sm border border-[rgba(232,84,72,0.4)] bg-[rgba(232,84,72,0.1)] p-3 text-body-sm text-semantic-error">
+          <div className="m-5 rounded-sm border border-[rgba(192,57,43,0.4)] bg-[rgba(192,57,43,0.1)] p-3 text-body-sm text-semantic-error">
             {loadError}
           </div>
         )}

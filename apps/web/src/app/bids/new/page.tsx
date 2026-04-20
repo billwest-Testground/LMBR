@@ -122,7 +122,7 @@ export default function NewBidPage() {
           {saveError && (
             <div
               role="alert"
-              className="rounded-sm border border-[rgba(232,84,72,0.4)] bg-[rgba(232,84,72,0.10)] px-3 py-2 text-body-sm text-semantic-error"
+              className="rounded-sm border border-[rgba(192,57,43,0.4)] bg-[rgba(192,57,43,0.10)] px-3 py-2 text-body-sm text-semantic-error"
             >
               {saveError}
             </div>

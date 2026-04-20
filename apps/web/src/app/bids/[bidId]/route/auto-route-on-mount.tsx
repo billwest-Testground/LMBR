@@ -52,7 +52,7 @@ export function AutoRouteOnMount({ bidId }: { bidId: string }) {
 
   if (status === 'running') {
     return (
-      <div className="flex items-center gap-3 rounded-sm border border-border-base bg-gradient-accent px-4 py-3">
+      <div className="flex items-center gap-3 rounded-sm border border-[rgba(29,184,122,0.25)] bg-[rgba(29,184,122,0.06)] px-4 py-3">
         <span className="loading-dots">
           <span />
           <span />
@@ -69,7 +69,7 @@ export function AutoRouteOnMount({ bidId }: { bidId: string }) {
     return (
       <div
         role="alert"
-        className="rounded-sm border border-[rgba(232,84,72,0.4)] bg-[rgba(232,84,72,0.10)] px-3 py-2 text-body-sm text-semantic-error"
+        className="rounded-sm border border-[rgba(192,57,43,0.4)] bg-[rgba(192,57,43,0.10)] px-3 py-2 text-body-sm text-semantic-error"
       >
         {error}
       </div>

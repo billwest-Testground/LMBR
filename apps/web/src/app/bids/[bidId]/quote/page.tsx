@@ -122,7 +122,7 @@ export default async function QuotePage({ params }: PageProps) {
       </header>
 
       {!quote && (
-        <div className="rounded-md border border-[rgba(232,168,50,0.4)] bg-[rgba(232,168,50,0.08)] px-4 py-3 text-body-sm text-semantic-warning">
+        <div className="rounded-md border border-[rgba(184,122,29,0.4)] bg-[rgba(184,122,29,0.08)] px-4 py-3 text-body-sm text-semantic-warning">
           No quote persisted for this bid yet. Open the margin stack and save
           a draft before previewing.
         </div>

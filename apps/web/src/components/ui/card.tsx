@@ -25,8 +25,13 @@ export interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
 const VARIANT_CLASSES: Record<CardVariant, string> = {
   standard:
     'bg-bg-surface border border-border-base rounded-md shadow-sm p-5',
+  // Monochrome-first: the `feature` variant used to use a teal gradient
+  // plus a teal-tinted border to call out active / best choices. In the
+  // monochrome system we earn the same emphasis through a stronger
+  // border + elevated surface — color stays reserved for primary
+  // buttons, active nav, and selected states.
   feature:
-    'bg-gradient-accent border border-[rgba(29,184,122,0.25)] rounded-md p-5',
+    'bg-bg-elevated border border-border-strong rounded-md shadow-sm p-5',
   stat:
     'bg-bg-surface border border-border-base rounded-md shadow-sm px-5 py-4',
 };
