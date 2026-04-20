@@ -26,9 +26,13 @@ export * from './lumber';
 export * from './attachment-analyzer';
 export * from './lumber-parser';
 export * from './cost-tracker';
-export * from './queue';
+// queue.ts is NOT in this barrel. It pulls in bullmq + ioredis, which
+// trip webpack's static module graph (node:net / worker_threads / fs /
+// dns externals) when consumed from a Next.js route. Import directly
+// from '@lmbr/lib/queue' in the worker + orchestrator only.
 export * from './vendor-token';
 export * from './vendor-visibility';
 export * from './crypto';
 export * from './pdf-quote';
 export * from './quote-release-gate';
+export * from './rate-limit';

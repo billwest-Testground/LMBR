@@ -32,6 +32,7 @@ import {
   BidLinesView,
   type BidLinesRow,
 } from '../../../components/bids/bid-lines-view';
+import { ExtractionVerificationBar } from '../../../components/bids/extraction-verification-bar';
 import {
   ArchiveActionButton,
   ArchivedBanner,
@@ -86,7 +87,7 @@ export default async function BidDetailPage({ params }: PageProps) {
   const { data: lineItems } = await supabase
     .from('line_items')
     .select(
-      'id, building_tag, phase_number, species, dimension, grade, length, quantity, unit, board_feet, notes, sort_order',
+      'id, building_tag, phase_number, species, dimension, grade, length, quantity, unit, board_feet, notes, sort_order, extraction_method, extraction_confidence',
     )
     .eq('bid_id', bid.id)
     .order('sort_order', { ascending: true });
@@ -104,6 +105,9 @@ export default async function BidDetailPage({ params }: PageProps) {
     board_feet: li.board_feet != null ? Number(li.board_feet) : null,
     notes: li.notes,
     sort_order: li.sort_order,
+    extraction_method: li.extraction_method ?? null,
+    extraction_confidence:
+      li.extraction_confidence != null ? Number(li.extraction_confidence) : null,
   }));
 
   const totalBF = rows.reduce((s, r) => s + (r.board_feet ?? 0), 0);
@@ -183,6 +187,8 @@ export default async function BidDetailPage({ params }: PageProps) {
         <Stat label="Building groups" value={buildingCount.toLocaleString()} />
         <Stat label="Job region" value={bid.job_region ?? '—'} />
       </div>
+
+      <ExtractionVerificationBar rows={rows} />
 
       <BidLinesView rows={rows} />
     </div>

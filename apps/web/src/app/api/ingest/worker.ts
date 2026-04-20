@@ -26,7 +26,7 @@
  * Built by Worklighter.
  */
 
-import { createIngestWorker } from '@lmbr/lib';
+import { createIngestWorker } from '@lmbr/lib/queue';
 
 import { processIngestJob } from './processor';
 

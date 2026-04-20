@@ -12,6 +12,7 @@
 
 import * as React from 'react';
 import Link from 'next/link';
+import type { Route } from 'next';
 import { ArrowRight, Clock } from 'lucide-react';
 
 import { StatusBadge, type BidStatus } from './status-badge';
@@ -38,7 +39,7 @@ export function BidCard({ bid, href, compact = false }: BidCardProps) {
   const destination = href ?? defaultHrefForStatus(bid.id, bid.status);
   return (
     <Link
-      href={destination}
+      href={destination as Route}
       className={cn(
         'group flex items-center justify-between gap-4 rounded-md border border-border-base bg-bg-surface p-4 shadow-sm transition-[background-color,border-color,box-shadow] duration-standard',
         'hover:border-border-strong hover:bg-bg-elevated hover:shadow-md',

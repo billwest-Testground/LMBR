@@ -16,7 +16,10 @@
       "@lmbr/config": [
         "../../packages/config/src"
       ]
-    }
+    },
+    "types": [
+      "node"
+    ]
   },
   "include": [
     "**/*.ts",
@@ -24,5 +27,9 @@
     ".expo/types/**/*.ts",
     "expo-env.d.ts",
     "nativewind-env.d.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "tailwind.config.ts"
   ]
 }

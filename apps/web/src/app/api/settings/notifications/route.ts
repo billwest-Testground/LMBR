@@ -31,18 +31,22 @@ import { getSupabaseAdmin } from '@lmbr/lib';
 import { getSupabaseRouteHandlerClient } from '../../../../lib/supabase/server';
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 const MANAGER_ROLES = new Set(['manager', 'owner']);
 
-export const NOTIFICATION_KEYS = [
+// Local — Next 14 disallows non-handler exports from route files.
+// Callers that need the key list import it from the client component,
+// which defines the same literal union.
+const NOTIFICATION_KEYS = [
   'new_bid_received',
   'vendor_bid_submitted',
   'quote_approved_rejected',
   'vendor_nudge_due',
 ] as const;
 
-export type NotificationKey = (typeof NOTIFICATION_KEYS)[number];
-export type NotificationPrefs = Record<NotificationKey, boolean>;
+type NotificationKey = (typeof NOTIFICATION_KEYS)[number];
+type NotificationPrefs = Record<NotificationKey, boolean>;
 
 const NotificationPrefsSchema = z.object({
   new_bid_received: z.boolean(),

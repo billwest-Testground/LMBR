@@ -60,8 +60,10 @@ import { NextResponse, type NextRequest } from 'next/server';
 
 import { scanbackAgent, type ScanbackExpectedLine } from '@lmbr/agents';
 import {
+  allow,
   analyzeDocument,
   assertTokenMatchesVendorBid,
+  clientIpFromHeaders,
   getSupabaseAdmin,
   OcrError,
   recordExtraction,
@@ -145,8 +147,35 @@ function closedLink(): NextResponse {
 // Handler
 // ---------------------------------------------------------------------------
 
+// Rate limit: 6 scan-back uploads per minute per IP. Each upload runs
+// Azure OCR (~5s) + Claude Haiku (~3s) and costs real money, so the
+// bucket is tighter than the typed vendor-submit endpoint. A vendor
+// re-uploading a clearer scan after a bad OCR pass fits in the
+// capacity; a drive-by loop gets 429'd.
+const EXTRACT_LIMIT = {
+  capacity: 6,
+  refillPerMs: 6 / 60_000, // 6 per 60s
+};
+
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
+    // --- Rate limit --------------------------------------------------------
+    const rl = allow(
+      `extract:${clientIpFromHeaders(req.headers)}`,
+      EXTRACT_LIMIT,
+    );
+    if (!rl.ok) {
+      return NextResponse.json(
+        { error: 'Too many uploads. Please try again shortly.' },
+        {
+          status: 429,
+          headers: {
+            'retry-after': String(Math.ceil(rl.retryAfterMs / 1000)),
+          },
+        },
+      );
+    }
+
     // --- Content type gate -------------------------------------------------
     const contentType = req.headers.get('content-type') ?? '';
     if (!contentType.toLowerCase().startsWith('multipart/form-data')) {

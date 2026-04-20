@@ -50,7 +50,9 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { z } from 'zod';
 
 import {
+  allow,
   assertTokenMatchesVendorBid,
+  clientIpFromHeaders,
   getSupabaseAdmin,
   toNumber,
   vendorVisibleIsConsolidatedFlag,
@@ -119,8 +121,38 @@ function unauthorized(): NextResponse {
   return NextResponse.json({ error: GENERIC_AUTH_ERROR }, { status: 401 });
 }
 
+// Rate limit: 20 requests per minute per source IP. Generous — a human
+// vendor submitting pricing hits this endpoint once per submit button
+// press, so 20/min is ~1 submit every 3s sustained. Abusive retry
+// loops or drive-by scanners get 429'd.
+const VENDOR_SUBMIT_LIMIT = {
+  capacity: 20,
+  refillPerMs: 20 / 60_000, // 20 per 60s
+};
+
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
+    // --- Rate limit ---------------------------------------------------------
+    // Per-IP bucket (header-derived). Token-based keying would be weaker
+    // because a valid token is exactly what an abuser wants to probe —
+    // rate-limiting the IP means a probe that tries many tokens still
+    // exhausts the same bucket.
+    const rl = allow(
+      `vendor-submit:${clientIpFromHeaders(req.headers)}`,
+      VENDOR_SUBMIT_LIMIT,
+    );
+    if (!rl.ok) {
+      return NextResponse.json(
+        { error: 'Too many submissions. Please try again shortly.' },
+        {
+          status: 429,
+          headers: {
+            'retry-after': String(Math.ceil(rl.retryAfterMs / 1000)),
+          },
+        },
+      );
+    }
+
     // --- Body parse ---------------------------------------------------------
     let rawBody: unknown;
     try {

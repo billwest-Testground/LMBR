@@ -40,11 +40,8 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 
-import {
-  enqueueOrRun,
-  getSupabaseAdmin,
-  type IngestJob,
-} from '@lmbr/lib';
+import { getSupabaseAdmin } from '@lmbr/lib';
+import { enqueueOrRun, type IngestJob } from '@lmbr/lib/queue';
 import { routeBidToRegion } from '@lmbr/config';
 
 import { getSupabaseRouteHandlerClient } from '../../../lib/supabase/server';

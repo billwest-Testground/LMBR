@@ -15,13 +15,13 @@
  *           Supabase auth cookie.
  * Outputs:  NextResponse with auth redirects / forwarded headers.
  * Agent/API: Supabase Auth + users/roles tables.
- * Imports:  @supabase/auth-helpers-nextjs, next/server.
+ * Imports:  @supabase/ssr, next/server.
  *
  * LMBR.ai — Enterprise AI bid automation for wholesale lumber distributors.
  * Built by Worklighter.
  */
 
-import { createMiddlewareClient } from '@supabase/auth-helpers-nextjs';
+import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
 const PROTECTED_PREFIXES = [
@@ -50,7 +50,29 @@ export async function middleware(req: NextRequest) {
   requestHeaders.delete('x-lmbr-roles');
 
   const res = NextResponse.next({ request: { headers: requestHeaders } });
-  const supabase = createMiddlewareClient({ req, res });
+  // @supabase/ssr middleware pattern: cookies flow both ways. Reads
+  // come off the incoming request; writes need to land on BOTH the
+  // request (for downstream handlers in the same middleware chain)
+  // and the response (for the browser to persist the refresh).
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        get(name: string) {
+          return req.cookies.get(name)?.value;
+        },
+        set(name: string, value: string, options: CookieOptions) {
+          req.cookies.set({ name, value, ...options });
+          res.cookies.set({ name, value, ...options });
+        },
+        remove(name: string, options: CookieOptions) {
+          req.cookies.set({ name, value: '', ...options });
+          res.cookies.set({ name, value: '', ...options });
+        },
+      },
+    },
+  );
 
   const {
     data: { session },

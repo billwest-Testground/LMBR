@@ -161,13 +161,18 @@ export default function MobileNewBid() {
     setError(null);
     try {
       const form = new FormData();
-      // React Native's FormData expects { uri, name, type } shape.
+      // React Native's FormData ships a shim that accepts a
+      // { uri, name, type } object in place of a browser Blob. The DOM
+      // typing we get from @types/react-native / @types/node still
+      // declares the standard Web API signature, so we cast through
+      // `unknown` to silence the mismatch. The RN runtime accepts the
+      // shape as-is and the Expo camera / document picker emit exactly
+      // { uri, name, mimeType } — see apps/mobile/src/hooks/use-upload-picker.
       form.append('file', {
-        // @ts-expect-error RN FormData shim — not a standard File.
         uri: pending.uri,
         name: pending.name,
         type: pending.mimeType,
-      });
+      } as unknown as Blob);
 
       const res = await fetch(`${API_URL}/api/ingest`, {
         method: 'POST',

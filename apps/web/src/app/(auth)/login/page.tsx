@@ -32,6 +32,7 @@
 
 import * as React from 'react';
 import Link from 'next/link';
+import type { Route } from 'next';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 import { getSupabaseBrowserClient } from '../../../lib/supabase/browser';
@@ -49,7 +50,21 @@ interface DetectedCompany {
   slug: string;
 }
 
+// useSearchParams() forces client-side bail-out during static
+// prerender in Next 14 unless it's inside a Suspense boundary. We
+// keep the real form in LoginPageInner and wrap it in the default
+// export — the empty fallback is fine because the prerendered HTML
+// only needs to exist; the actual interactive form hydrates on the
+// client and reads searchParams there.
 export default function LoginPage() {
+  return (
+    <React.Suspense fallback={null}>
+      <LoginPageInner />
+    </React.Suspense>
+  );
+}
+
+function LoginPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const supabase = React.useMemo(() => getSupabaseBrowserClient(), []);
@@ -108,7 +123,7 @@ export default function LoginPage() {
         setError(signInError.message);
         return;
       }
-      router.replace(next);
+      router.replace(next as Route);
       router.refresh();
       return;
     }

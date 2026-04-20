@@ -900,50 +900,126 @@ Track progress here as modules are completed:
       page (sidesteps the typedRoutes mismatch). Do not inline
       either workaround into the deferred files — Prompt 12's root-
       cause fix needs to see the original call sites.
-- [ ] PROMPT 12 — Polish + QA pass
+- [x] PROMPT 12 — Polish + QA pass
+    - **Build is now green.** `pnpm exec next build` in apps/web
+      compiles + prerenders + exports with no errors. 55/55 static
+      pages. Before Prompt 12 the build failed on bullmq/ioredis
+      webpack resolution, and subsequent leaks from pdf-parse /
+      @azure/msal-node / typed-routes / lucide icons / Suspense-
+      boundary / useSearchParams. All fixed.
+    - **Invariant — `@lmbr/lib` barrel is server-and-client safe.**
+      `queue.ts` is explicitly NOT in the barrel (see the comment
+      at `packages/lib/src/index.ts`). Consumers import from
+      `@lmbr/lib/queue` (subpath + `exports` map in package.json +
+      tsconfig paths). Same pattern exists for `@lmbr/lib/lumber`.
+      When adding a new module with Node-only deps, follow the same
+      pattern rather than adding to the barrel.
+    - **Invariant — webpack externals for Node-only packages.**
+      `next.config.mjs` has a `webpack()` hook that marks bullmq,
+      ioredis, pdf-parse, mammoth, exceljs, csv-parse, @azure/msal-
+      node, @azure/ai-form-recognizer, @microsoft/microsoft-graph-
+      client as `commonjs` externals for the server bundle. Next's
+      `experimental.serverComponentsExternalPackages` alone does
+      not catch these because they enter the graph via
+      `transpilePackages` workspace modules, which webpack traces
+      BEFORE the experimental flag applies. Keep both entries in
+      sync when adding a new Node-only dep.
+    - **Invariant — Supabase auth runs on `@supabase/ssr`.**
+      Migrated from the deprecated `@supabase/auth-helpers-nextjs`
+      to `@supabase/ssr` for three surface areas: `lib/supabase/
+      browser.ts`, `lib/supabase/server.ts`, `middleware.ts`. The
+      RSC client's set/remove cookie handlers are intentional
+      no-ops — `cookies()` is read-only under RSC. Route handlers
+      and middleware use the full read/write pattern, with the
+      middleware variant syncing writes to BOTH req and res cookie
+      jars so downstream handlers in the same middleware chain see
+      fresh session values.
+    - **Invariant — login page prerender safety.** `/login` uses
+      `useSearchParams()`, which forces Next 14 to bail out of
+      static prerender. The page default export wraps a
+      `LoginPageInner` component in `<React.Suspense fallback={
+      null}>` so prerender succeeds with an empty HTML skeleton;
+      the real interactive form hydrates on the client where
+      searchParams + cookies are available. Do not remove the
+      Suspense wrapper.
+    - **Invariant — correction_logs captures every line-item edit.**
+      Migration 029 + the fire-and-forget insert in
+      `apps/web/src/app/api/bids/[bidId]/line-items/route.ts`
+      guarantee that every trader save writes a
+      (before, after, delta) row when anything tracked changed.
+      RLS is tenant-scoped + append-only (no UPDATE / DELETE
+      policies). This is the labeled training set the SLM fine-
+      tune path in CLAUDE.md depends on. The insert MUST stay
+      fire-and-forget — a correction_logs failure must never fail
+      the trader's edit.
+    - **Invariant — extraction provenance surfaces in the UI.**
+      BidLinesView reads from `line_items.extraction_method` and
+      `extraction_confidence` columns (migration 014) rather than
+      the legacy notes JSON blob, falling back to the blob only
+      for legacy rows. The method badge column shows spreadsheet /
+      PDF-text / OCR / AI-extraction icons. The
+      ExtractionVerificationBar above the table summarizes lines /
+      BF / groups / flagged / avg-confidence / method mix in a
+      collapsible chip.
+    - **Rate limiting on public endpoints.** `/api/vendor-submit`
+      (20 req/min/IP) and `/api/extract` (6 req/min/IP) pass
+      through `allow()` in `@lmbr/lib/rate-limit.ts`. In-memory
+      token bucket — per-process, not per-instance, so a multi-
+      replica deploy gets N × limit. Acceptable for V1; upgrade
+      to Upstash + Redis when the public endpoints see real
+      volume.
+    - **Mobile hardening.** Pinned mobile package versions
+      (expo-image-picker ~15.1, react-native 0.74.5, typescript
+      ~5.3.3, @types/react ~18.2.79). Added `tailwindcss` + `@types/
+      node` dev deps. `tailwind.config.ts` is excluded from the
+      mobile tsc pass because it lives at the app root, not under
+      `src/`. React type drift between mobile (18.2) and web (18.3)
+      is pinned globally via a pnpm `overrides` block in root
+      `package.json` — do not remove without testing BOTH builds.
+    - **Group header regex — abbreviated forms.**
+      `packages/lib/src/lumber-parser.ts` GROUP_HEADER_REGEX now
+      accepts "H1 / H 2 / B3 / L4" trader shorthand alongside the
+      full-word forms. "P1" is intentionally NOT accepted —
+      collides with pine-grade-1. Locked by the 4 vitest cases in
+      `lumber-parser-group-header.test.ts`.
+    - **Test count: 105** — 62 agents + 25 lib + 18 config. Lib
+      grew 9 tests this prompt (4 group header + 5 rate limit).
+    - **`pnpm audit --prod` review.** 15 advisories
+      (11 high / 3 moderate / 1 low). All are upstream-blocked:
+      Next 15 advisories require Next 15 upgrade (major bump),
+      Expo / @expo/cli transitive deps (tar, send, @xmldom/xmldom)
+      wait on Expo updates, `xlsx` has no patched version. No
+      actionable fix in Prompt 12 scope; revisit when Next 15 is
+      the base.
+    - **Security review.** Manual pass across Prompt 12 changes —
+      rate limiter (in-memory, no leakage), correction_logs (RLS +
+      auth.uid gate, append-only), SSR migration (improves posture
+      by replacing deprecated package), webpack config (no secret
+      exposure). No new attack surface introduced. Full `/cso`
+      skill run recommended as a dedicated follow-up session.
 - [ ] Demo seed data
 - [ ] EAS mobile build
 - [ ] App Store submission
 
 ---
 
-## Known Pre-existing Errors (deferred to Prompt 12)
+## Known Pre-existing Errors (historical — cleared in Prompt 12)
 
-`apps/web` — 9 errors in 3 untouched files:
+Prompt 12 closed out the 9 typecheck errors and the webpack build
+failures originally listed here. Section retained for historical
+context only; nothing currently blocking in the list.
 
-- **`console-sidebar.tsx`** (lines 40-45, 75):
-  lucide-react `ForwardRefExoticComponent` vs `ComponentType`.
-  Root cause: `@types/react` version mismatch with lucide-react.
-  Fix: align `@types/react` or narrow local Icon component type.
+Upstream-blocked items remaining (see `pnpm audit --prod`):
 
-- **`bid-card.tsx:41`** + **`login/page.tsx:111`**:
-  Next.js `typedRoutes` `href` string vs `RouteImpl<string>`.
-  Fix: switch to `Route<>` typed hrefs or disable `typedRoutes`.
+- Next 14 advisories are all patched in Next 15+; blocked on a
+  Next-15 major upgrade (typed-routes API changes, `.ts` config
+  support, etc).
+- Expo 51 transitive deps (tar, send, @xmldom/xmldom) wait on
+  Expo maintainer updates.
+- `xlsx` — no patched community version exists. Move to
+  `exceljs` (already a dep) for any new code paths.
 
-`apps/mobile` — deferred per design doc §3.12:
-
-- NativeWind `className` errors in `scan.tsx`
-- `tailwind.config.ts` types missing
-- Fix: alongside Prompt 12 mobile polish pass
-
-`apps/web` production build — `pnpm -w build` fails:
-
-- `pnpm -w build` (apps/web production build) fails with
-  bullmq/ioredis webpack resolution errors. Root cause:
-  `packages/lib/src/queue.ts` is transitively pulled into
-  `apps/web/src/app/bids/[bidId]/vendors/page.tsx` through
-  the `@lmbr/lib` barrel import. Fix in Prompt 12:
-    Option A: move queue.ts out of the barrel export
-      (only export it where explicitly needed)
-    Option B: add webpack externals config for bullmq
-      and ioredis in next.config.ts
-    Option C: dynamic import with ssr: false on the
-      queue module consumer
-  Recommend Option A — cleanest, no webpack config
-  needed. queue.ts should not be in the default barrel.
-
-None of these are in the ingest code path.
-**Do not fix during active feature prompts — address in Prompt 12.**
+None of these have actionable fixes in scope.
 
 ---
 

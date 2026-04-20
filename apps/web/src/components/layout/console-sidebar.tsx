@@ -18,6 +18,7 @@
 
 import * as React from 'react';
 import Link from 'next/link';
+import type { Route } from 'next';
 import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard,
@@ -30,10 +31,16 @@ import {
 
 import { cn } from '../../lib/cn';
 
+// React.ElementType — lucide icons are ForwardRefExoticComponent whose
+// `aria-hidden` signature is `Booleanish` (accepts "true" | "false" |
+// boolean), which doesn't fit a narrower `{ 'aria-hidden'?: boolean }`
+// local type. ElementType accepts any renderable component including
+// refs and avoids the cross-version @types/react mismatch with
+// lucide-react's prop declarations.
 interface NavItem {
   label: string;
-  href: string;
-  icon: React.ComponentType<{ className?: string; 'aria-hidden'?: boolean }>;
+  href: Route;
+  icon: React.ElementType;
 }
 
 const NAV_ITEMS: NavItem[] = [

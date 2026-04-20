@@ -57,10 +57,10 @@ import {
   parseLumberList,
   recordExtractionBatch,
   type AttachmentAnalysisResult,
-  type IngestJob,
   type ParseResult,
   type RecordExtractionInput,
 } from '@lmbr/lib';
+import type { IngestJob } from '@lmbr/lib/queue';
 import type {
   ExtractedBuildingGroup,
   ExtractedLineItem,

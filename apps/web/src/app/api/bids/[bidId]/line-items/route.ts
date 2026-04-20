@@ -84,9 +84,13 @@ export async function PATCH(
     );
   }
 
+  // Select every column the correction-log diff might reference so we
+  // can compute pre-edit vs post-edit snapshots without a second read.
   const { data: existing, error: existingError } = await supabase
     .from('line_items')
-    .select('id, sort_order')
+    .select(
+      'id, sort_order, building_tag, phase_number, species, dimension, grade, length, quantity, unit, board_feet',
+    )
     .eq('bid_id', bid.id)
     .order('sort_order', { ascending: true });
   if (existingError) {
@@ -100,7 +104,14 @@ export async function PATCH(
   // and the editable UI rows — the ingest route wrote sort_order in
   // extraction order, and the table preserves it until the trader
   // explicitly reorders (reordering is a follow-up feature).
-  const updates: Array<{ id: string; patch: Record<string, unknown> }> = [];
+  const updates: Array<{
+    id: string;
+    patch: Record<string, unknown>;
+    // Snapshot of the row as it stood in the DB before this edit.
+    // Used later to compute the correction_logs delta without a
+    // second read. Present on every update; absent on inserts.
+    before: Record<string, unknown>;
+  }> = [];
   const inserts: Array<Record<string, unknown>> = [];
 
   payload.forEach((row, index) => {
@@ -126,7 +137,18 @@ export async function PATCH(
     };
     const match = existingRows[index];
     if (match) {
-      updates.push({ id: match.id, patch: dbRow });
+      const before: Record<string, unknown> = {
+        building_tag: match.building_tag,
+        phase_number: match.phase_number,
+        species: match.species,
+        dimension: match.dimension,
+        grade: match.grade,
+        length: match.length,
+        quantity: match.quantity,
+        unit: match.unit,
+        board_feet: match.board_feet,
+      };
+      updates.push({ id: match.id, patch: dbRow, before });
     } else {
       inserts.push(dbRow);
     }
@@ -150,12 +172,79 @@ export async function PATCH(
     insertedCount = count ?? inserts.length;
   }
 
-  for (const { id, patch } of updates) {
+  // Fields the correction_logs delta inspects. Must match the `before`
+  // snapshot keys exactly — any field added here needs a matching read
+  // in the select above and a matching assignment when building `dbRow`.
+  const TRACKED_FIELDS = [
+    'building_tag',
+    'phase_number',
+    'species',
+    'dimension',
+    'grade',
+    'length',
+    'quantity',
+    'unit',
+    'board_feet',
+  ] as const;
+
+  const correctionInserts: Array<Record<string, unknown>> = [];
+
+  for (const { id, patch, before } of updates) {
     const { error } = await supabase.from('line_items').update(patch).eq('id', id);
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
     updatedCount += 1;
+
+    // Compute the structured delta. Skip the row entirely if nothing
+    // meaningful changed — we don't want to flood the log with no-op
+    // saves (a trader hits Save after only toggling a flag, say).
+    const fieldsChanged: string[] = [];
+    const details: Record<string, { before: unknown; after: unknown }> = {};
+    for (const field of TRACKED_FIELDS) {
+      const b = before[field];
+      const a = patch[field];
+      // Number equality is safe because we coerce above; string/null
+      // equality is shallow. For numeric quantity/board_feet, small
+      // float drift after a PCS↔MBF round-trip still registers as a
+      // change — that's correct for fine-tune purposes.
+      if (b !== a) {
+        fieldsChanged.push(field);
+        details[field] = { before: b, after: a };
+      }
+    }
+    if (fieldsChanged.length === 0) continue;
+
+    correctionInserts.push({
+      company_id: bid.company_id,
+      bid_id: bid.id,
+      line_item_id: id,
+      original_extraction: before,
+      corrected_extraction: Object.fromEntries(
+        TRACKED_FIELDS.map((field) => [field, patch[field] ?? null]),
+      ),
+      correction_delta: { fieldsChanged, details },
+      corrected_by: session.user.id,
+    });
+  }
+
+  // Fire-and-forget correction_logs write. A failure here must NOT
+  // fail the line-item edit — the training dataset is secondary to
+  // the trader's actual bid workflow. Log a warn-level line so ops
+  // can see the write rate if something regresses.
+  if (correctionInserts.length > 0) {
+    void supabase
+      .from('correction_logs')
+      .insert(correctionInserts)
+      .then(({ error }) => {
+        if (error) {
+          console.warn('[correction_logs] insert failed', {
+            bidId: bid.id,
+            count: correctionInserts.length,
+            error: error.message,
+          });
+        }
+      });
   }
 
   if (deleteIds.length > 0) {

@@ -155,8 +155,13 @@ const GRADE_SCAN: Array<[RegExp, string]> = [
   [/\b(msr|machine\s*stress)\b/i, 'MSR'],
 ];
 
+// Accepts full-word tokens ("House 1", "Building A", "Phase 2") and the
+// trader-shorthand abbreviations ("H1", "H 2", "B3", "L4") that show up
+// in hand-typed takeoffs. The inner letter group matches h/b/l — we
+// intentionally do NOT accept "p" as a phase shorthand because it
+// collides with real lumber tokens ("P1" reads as pine-grade-1).
 const GROUP_HEADER_REGEX =
-  /^\s*(house|lot|building|bldg|phase|block)\b[\s#:\-]*([0-9a-z]+)?/i;
+  /^\s*(?:(?:house|lot|building|bldg|phase|block)\b[\s#:\-]*([0-9a-z]+)?|(?:[hbl])\s*(\d+))/i;
 
 const PHASE_NUMBER_REGEX = /phase\s*(\d+)/i;
 

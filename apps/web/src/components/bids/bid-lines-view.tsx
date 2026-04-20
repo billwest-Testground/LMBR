@@ -17,7 +17,16 @@
 'use client';
 
 import * as React from 'react';
-import { AlertCircle, AlertTriangle, Info } from 'lucide-react';
+import {
+  AlertCircle,
+  AlertTriangle,
+  FileSpreadsheet,
+  FileText,
+  Info,
+  ScanLine,
+  Sparkles,
+  Type,
+} from 'lucide-react';
 
 import { cn } from '../../lib/cn';
 
@@ -34,6 +43,11 @@ export interface BidLinesRow {
   board_feet: number | null;
   notes: string | null;
   sort_order: number;
+  // Populated by migration 014. Nullable until the whole table has been
+  // backfilled (legacy rows predate the column) — parseMeta falls back
+  // to the notes JSON blob for those.
+  extraction_method?: string | null;
+  extraction_confidence?: number | null;
 }
 
 interface LineMeta {
@@ -42,21 +56,101 @@ interface LineMeta {
   original_text: string;
 }
 
-function parseMeta(notes: string | null): LineMeta {
-  if (!notes) return { confidence: 1, flags: [], original_text: '' };
-  try {
-    const parsed = JSON.parse(notes);
-    return {
-      confidence:
-        typeof parsed.confidence === 'number' ? parsed.confidence : 1,
-      flags: Array.isArray(parsed.flags) ? parsed.flags : [],
-      original_text:
-        typeof parsed.original_text === 'string' ? parsed.original_text : '',
-    };
-  } catch {
-    return { confidence: 1, flags: [], original_text: '' };
+// Prefer the dedicated `extraction_method` + `extraction_confidence`
+// columns (migration 014) over the legacy `notes` JSON blob — the new
+// columns are method-aware and feed the badge UI. We still read
+// `flags` + `original_text` from the blob because those haven't been
+// split out yet. A fully-migrated row will have both populated; a
+// legacy row falls back entirely to the JSON parse path.
+function parseMeta(row: BidLinesRow): LineMeta {
+  const columnConfidence =
+    typeof row.extraction_confidence === 'number'
+      ? row.extraction_confidence
+      : null;
+
+  let flags: string[] = [];
+  let originalText = '';
+  let blobConfidence: number | null = null;
+  if (row.notes) {
+    try {
+      const parsed = JSON.parse(row.notes);
+      if (typeof parsed.confidence === 'number') blobConfidence = parsed.confidence;
+      if (Array.isArray(parsed.flags)) flags = parsed.flags;
+      if (typeof parsed.original_text === 'string')
+        originalText = parsed.original_text;
+    } catch {
+      // notes is plain text, not JSON — treat it as the original source
+      // line and leave confidence/flags at their defaults.
+      originalText = row.notes;
+    }
   }
+
+  return {
+    confidence: columnConfidence ?? blobConfidence ?? 1,
+    flags,
+    original_text: originalText,
+  };
 }
+
+// Method → human label + icon + tooltip blurb. Kept tight: one entry
+// per canonical value from @lmbr/types ExtractionMethodSchema.
+interface MethodBadge {
+  label: string;
+  blurb: string;
+  Icon: React.ElementType;
+  className: string;
+}
+const METHOD_BADGES: Record<string, MethodBadge> = {
+  excel_parse: {
+    label: 'Spreadsheet',
+    blurb: 'Parsed directly from an Excel workbook (free, deterministic).',
+    Icon: FileSpreadsheet,
+    className: 'text-accent-primary',
+  },
+  csv_parse: {
+    label: 'CSV',
+    blurb: 'Parsed directly from a CSV file (free, deterministic).',
+    Icon: FileSpreadsheet,
+    className: 'text-accent-primary',
+  },
+  pdf_direct: {
+    label: 'PDF text',
+    blurb: 'Extracted from a text-layer PDF (free, deterministic).',
+    Icon: FileText,
+    className: 'text-accent-primary',
+  },
+  docx_parse: {
+    label: 'DOCX',
+    blurb: 'Parsed directly from a Word document (free, deterministic).',
+    Icon: FileText,
+    className: 'text-accent-primary',
+  },
+  email_text: {
+    label: 'Email',
+    blurb: 'Extracted from an inbound email body (free, deterministic).',
+    Icon: FileText,
+    className: 'text-accent-primary',
+  },
+  direct_text: {
+    label: 'Text',
+    blurb: 'Extracted from a plain-text source (free, deterministic).',
+    Icon: Type,
+    className: 'text-accent-primary',
+  },
+  ocr: {
+    label: 'Scan / OCR',
+    blurb: 'Azure Document Intelligence OCR — scanned or image-based PDF.',
+    Icon: ScanLine,
+    className: 'text-semantic-warning',
+  },
+  claude_extraction: {
+    label: 'AI extraction',
+    blurb:
+      'Claude Sonnet fallback — ambiguous source; worth a closer review.',
+    Icon: Sparkles,
+    className: 'text-semantic-info',
+  },
+};
 
 interface Group {
   buildingTag: string;
@@ -104,6 +198,9 @@ export function BidLinesView({ rows }: { rows: BidLinesRow[] }) {
               <Th className="w-10" align="center">
                 <span className="sr-only">Confidence</span>
               </Th>
+              <Th className="w-10" align="center">
+                <span className="sr-only">Method</span>
+              </Th>
               <Th>Species</Th>
               <Th>Dimension</Th>
               <Th>Grade</Th>
@@ -143,7 +240,7 @@ export function BidLinesView({ rows }: { rows: BidLinesRow[] }) {
           <tfoot className="sticky bottom-0 z-20">
             <tr className="bg-bg-elevated">
               <td
-                colSpan={5}
+                colSpan={6}
                 className="border-t border-border-strong px-3 py-3"
               >
                 <span className="text-label uppercase text-text-tertiary">
@@ -187,7 +284,7 @@ function GroupHeaderRow({
   return (
     <tr className="sticky top-[37px] z-10">
       <td
-        colSpan={10}
+        colSpan={11}
         className="border-b border-border-base bg-bg-surface px-3 py-3"
       >
         <div className="flex items-center gap-3 border-l-[3px] border-accent-primary pl-3">
@@ -220,7 +317,10 @@ function GroupHeaderRow({
 }
 
 function LineRow({ row }: { row: BidLinesRow }) {
-  const meta = parseMeta(row.notes);
+  const meta = parseMeta(row);
+  const badge = row.extraction_method
+    ? (METHOD_BADGES[row.extraction_method] ?? null)
+    : null;
   const tone =
     meta.confidence < 0.75
       ? 'error'
@@ -249,6 +349,19 @@ function LineRow({ row }: { row: BidLinesRow }) {
           aria-label={`Confidence ${Math.round(meta.confidence * 100)}%`}
           title={`Confidence ${Math.round(meta.confidence * 100)}%`}
         />
+      </td>
+      <td className="border-b border-border-subtle px-3 py-2 text-center">
+        {badge && (
+          <span
+            title={`${badge.label} — ${badge.blurb}`}
+            aria-label={badge.label}
+          >
+            <badge.Icon
+              className={cn('h-4 w-4 inline-block', badge.className)}
+              aria-hidden="true"
+            />
+          </span>
+        )}
       </td>
       <td className="border-b border-border-subtle px-3 py-2 text-text-primary">
         {row.species}

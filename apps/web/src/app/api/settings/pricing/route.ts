@@ -36,10 +36,12 @@ import { getSupabaseAdmin } from '@lmbr/lib';
 import { getSupabaseRouteHandlerClient } from '../../../../lib/supabase/server';
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 const MANAGER_ROLES = new Set(['manager', 'owner']);
 
-export interface PricingSettingsPayload {
+// Local — Next 14 disallows non-handler exports from route files.
+interface PricingSettingsPayload {
   approvalThresholdDollars: number;
   minMarginPercent: number;
   marginPresets: number[];

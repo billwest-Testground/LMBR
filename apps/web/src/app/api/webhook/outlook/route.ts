@@ -53,14 +53,13 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { randomUUID } from 'node:crypto';
 
 import {
-  enqueueOrRun,
   fetchMessageAttachments,
   getGraphClient,
   getSupabaseAdmin,
   sendMail,
   verifyOutlookClientState,
-  type IngestJob,
 } from '@lmbr/lib';
+import { enqueueOrRun, type IngestJob } from '@lmbr/lib/queue';
 
 import { BIDS_BUCKET, processIngestJob } from '../../ingest/processor';
 

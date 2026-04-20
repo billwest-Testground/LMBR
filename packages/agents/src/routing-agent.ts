@@ -36,7 +36,13 @@
  * Built by Worklighter.
  */
 
-import { normalizeSpecies } from '@lmbr/lib';
+// Narrow-import from the lumber subpath — going through the @lmbr/lib
+// barrel pulls in attachment-analyzer (pdf-parse → fs) and outlook
+// (@azure/msal-node → fs), which webpack can't resolve for client
+// bundles. routing-agent is pure TS and we want client code
+// (margin-stack.tsx) to reach commodityGroupFor without dragging
+// server-only modules into the browser chunk.
+import { normalizeSpecies } from '@lmbr/lib/lumber';
 
 // -----------------------------------------------------------------------------
 // Input / output types

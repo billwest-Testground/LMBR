@@ -35,6 +35,7 @@ import { getSupabaseAdmin } from '@lmbr/lib';
 import { getSupabaseRouteHandlerClient } from '../../../../../lib/supabase/server';
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 const MANAGER_ROLES = new Set(['manager', 'owner']);
 const MAX_BYTES = 2 * 1024 * 1024; // 2MB

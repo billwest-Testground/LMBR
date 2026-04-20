@@ -21,6 +21,8 @@
       "@lmbr/agents/routing-agent": ["../../packages/agents/src/routing-agent"],
       "@lmbr/types": ["../../packages/types/src"],
       "@lmbr/lib": ["../../packages/lib/src"],
+      "@lmbr/lib/queue": ["../../packages/lib/src/queue"],
+      "@lmbr/lib/lumber": ["../../packages/lib/src/lumber"],
       "@lmbr/config": ["../../packages/config/src"]
     }
   },

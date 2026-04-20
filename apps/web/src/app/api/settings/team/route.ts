@@ -32,6 +32,7 @@ import { getSupabaseAdmin } from '@lmbr/lib';
 import { getSupabaseRouteHandlerClient } from '../../../../lib/supabase/server';
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 const MANAGER_ROLES = new Set(['manager', 'owner']);
 
@@ -39,7 +40,7 @@ const MANAGER_ROLES = new Set(['manager', 'owner']);
 // bootstrapped at onboarding and promotion is a separate manual flow.
 const INVITABLE_ROLE_VALUES = ['trader', 'buyer', 'trader_buyer', 'manager'] as const;
 const InvitableRoleSchema = z.enum(INVITABLE_ROLE_VALUES);
-export type InvitableRole = z.infer<typeof InvitableRoleSchema>;
+type InvitableRole = z.infer<typeof InvitableRoleSchema>;
 
 const InviteSchema = z.object({
   email: z.string().email(),
@@ -47,7 +48,8 @@ const InviteSchema = z.object({
   roleType: InvitableRoleSchema,
 });
 
-export interface TeamMember {
+// Local — Next 14 disallows non-handler exports from route files.
+interface TeamMember {
   id: string;
   email: string;
   fullName: string | null;

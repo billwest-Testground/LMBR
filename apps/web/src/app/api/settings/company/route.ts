@@ -33,11 +33,18 @@ import { ConsolidationModeSchema } from '@lmbr/types';
 import { getSupabaseRouteHandlerClient } from '../../../../lib/supabase/server';
 
 export const runtime = 'nodejs';
+// cookies() inside resolveContext forces dynamic rendering. Declare
+// it here so the Next 14 build skips static analysis — without the
+// flag, `next build` emits DYNAMIC_SERVER_USAGE errors (non-fatal in
+// runtime but noisy in logs) and in strict mode can fail prerender.
+export const dynamic = 'force-dynamic';
 
 const MANAGER_ROLES = new Set(['manager', 'owner']);
 const KNOWN_REGIONS = new Set(US_REGIONS.map((r) => r.id));
 
-export interface CompanySettingsPayload {
+// Local — Next 14 disallows non-handler exports from route files. The
+// form component defines its own local copy of this shape.
+interface CompanySettingsPayload {
   name: string;
   timezone: string;
   logoUrl: string | null;
