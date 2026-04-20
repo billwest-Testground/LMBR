@@ -828,7 +828,78 @@ Track progress here as modules are completed:
       closed quote adds a row to the knowledge base, and that
       history is RLS-locked to the tenant by design. Making this
       data portable is intentionally hard.
-- [ ] PROMPT 11 — Settings + company config
+- [x] PROMPT 11 — Settings + company config
+    - **Migration 028** added four columns to `public.companies`:
+      `logo_url text`, `notification_prefs jsonb` (all keys default
+      true), `default_consolidation_mode consolidation_mode`
+      (defaults `'structured'`), `job_regions_served text[]` (empty
+      = serves everywhere). Plus the `company-logos` Storage bucket
+      (public read, manager/owner write, path-prefix scoped to
+      `{companyId}/…`). RLS on `public.companies` inherits
+      `companies_update_manager` from migration 002; in-route role
+      gates stay in place for crisp 403s.
+    - **Settings index — live completion chips.** `/settings` loads
+      five section statuses in one parallel-fetch sweep via
+      `loadSettingsStatus(companyId)`: company (logo + regions),
+      team (pending invites / solo / multi-user), integrations
+      (Outlook subscription), pricing (always ok — defaults
+      sensible), notifications (diffs vs migration defaults).
+      Company + team are the only sections that can surface `warn`
+      today; rest are `ok` / `empty`.
+    - **Invariant — deactivation via role-drop, not schema.**
+      `PATCH /api/settings/team/{userId}` body `{ role: null }`
+      deletes the user's single `public.roles` row. The `public.users`
+      row and `auth.users` row persist so every FK (bids.created_by,
+      bids.assigned_trader_id, archived_by, etc.) keeps resolving.
+      Reactivation re-inserts a role. Do not add a `users.is_active`
+      column to implement deactivation — RLS already enforces the
+      effect via `has_role()` / `is_manager_or_owner()` helpers.
+    - **Invariant — pending-invite detection.** `/api/settings/team`
+      GET reads `auth.admin.listUsers()` and flags
+      `lastSignInAt === null` as pending. `DELETE /api/settings/team/{userId}`
+      is strictly for pending invites — 409 if the user has ever
+      signed in. Existing users go through role-drop instead.
+    - **Invariant — owner demotion guard.** Owner role changes
+      require caller = owner AND `ownerCount > 1`. Prevents solo-
+      owner lockout. `apps/web/src/app/api/settings/team/[userId]/route.ts`
+      is the single source of truth for that check.
+    - **Invariant — logo storage path convention.** Company logos
+      live at `company-logos/{companyId}/logo.{png|jpg|svg|webp}`.
+      The RLS policies on `storage.objects` enforce the prefix match
+      against `current_company_id()`. Upload uses `upsert: true` so
+      re-upload overwrites in-place — a tenant never accumulates
+      orphan logo generations. Returned URL has a `?v={ts}` cache-
+      buster so the PDF render path never reads a stale generation.
+    - **Invariant — notifications normalize to default `true`.**
+      Missing keys in `companies.notification_prefs` are treated as
+      `true` by the normalize helper in
+      `apps/web/src/app/api/settings/notifications/route.ts`.
+      Rolling out a new toggle in the future must keep the same
+      semantic: don't add a key with default `false` without
+      updating migration 028's jsonb default in the same migration.
+    - **Timezone picker (`@lmbr/config`).**
+      `COMPANY_TIMEZONES` is the curated list the settings picker
+      constrains to. `isKnownTimezone()` is the zod refiner on the
+      PUT route. The DB column still accepts any IANA string —
+      customer support can UPDATE directly for tenants that need a
+      zone outside the catalog. Catalog locked by vitest coverage
+      in `packages/config/src/__tests__/timezones.test.ts` (7 cases).
+    - **Cron wiring docs** live at `docs/operations.md`. Two
+      targets — `POST /api/market/aggregate` (daily, 02:15 UTC) and
+      `POST /api/webhook/outlook/renew` (every 6h). Covers Vercel
+      Cron with a unified `CRON_SECRET`, crontab syntax, GitHub
+      Actions fallback, verification curls, and the "don't retry
+      on 5xx" ops rule. Prompt 11 ships docs only — the actual
+      schedule is deploy-time config.
+    - **Pre-existing errors not fixed.** The 9 errors listed in
+      "Known Pre-existing Errors (deferred to Prompt 12)" below
+      are unchanged — lucide icon types on `console-sidebar.tsx` /
+      `bid-card.tsx` and `typedRoutes` on three files. New settings
+      code uses `React.ElementType` for the icon slot (sidesteps
+      the lucide mismatch) and casts `href as Route` on the index
+      page (sidesteps the typedRoutes mismatch). Do not inline
+      either workaround into the deferred files — Prompt 12's root-
+      cause fix needs to see the original call sites.
 - [ ] PROMPT 12 — Polish + QA pass
 - [ ] Demo seed data
 - [ ] EAS mobile build
@@ -854,6 +925,22 @@ Track progress here as modules are completed:
 - NativeWind `className` errors in `scan.tsx`
 - `tailwind.config.ts` types missing
 - Fix: alongside Prompt 12 mobile polish pass
+
+`apps/web` production build — `pnpm -w build` fails:
+
+- `pnpm -w build` (apps/web production build) fails with
+  bullmq/ioredis webpack resolution errors. Root cause:
+  `packages/lib/src/queue.ts` is transitively pulled into
+  `apps/web/src/app/bids/[bidId]/vendors/page.tsx` through
+  the `@lmbr/lib` barrel import. Fix in Prompt 12:
+    Option A: move queue.ts out of the barrel export
+      (only export it where explicitly needed)
+    Option B: add webpack externals config for bullmq
+      and ioredis in next.config.ts
+    Option C: dynamic import with ssr: false on the
+      queue module consumer
+  Recommend Option A — cleanest, no webpack config
+  needed. queue.ts should not be in the default barrel.
 
 None of these are in the ingest code path.
 **Do not fix during active feature prompts — address in Prompt 12.**

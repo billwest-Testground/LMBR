@@ -17,3 +17,4 @@
 export * from './commodities';
 export * from './regions';
 export * from './tax-rates';
+export * from './timezones';

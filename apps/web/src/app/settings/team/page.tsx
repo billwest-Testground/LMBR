@@ -1,17 +1,9 @@
 /**
- * /settings/company — company profile.
+ * /settings/team — team management.
  *
- * Purpose:  Server shell that gates on session + tenant and hands off to
- *           the CompanyForm client island. The client fetches the
- *           settings payload via GET /api/settings/company and mutates
- *           via PUT + /logo. We keep the server component thin because
- *           every write needs to be client-driven for optimistic UI +
- *           file uploads.
- *
- * Inputs:   session.
- * Outputs:  JSX.
- * Agent/API: Supabase.
- * Imports:  next/navigation, supabase server, ./company-form, ../back-link.
+ * Server shell wraps the TeamClient island. Non-manager / non-owner
+ * callers land on a read-only view. Tenancy is enforced by the
+ * underlying API routes.
  *
  * LMBR.ai — Enterprise AI bid automation for wholesale lumber distributors.
  * Built by Worklighter.
@@ -22,11 +14,11 @@ import { redirect } from 'next/navigation';
 import { getSupabaseRSCClient } from '../../../lib/supabase/server';
 
 import { BackToSettingsLink } from '../back-to-settings';
-import { CompanyForm } from './company-form';
+import { TeamClient } from './team-client';
 
 export const dynamic = 'force-dynamic';
 
-export default async function SettingsCompanyPage() {
+export default async function SettingsTeamPage() {
   const supabase = getSupabaseRSCClient();
   const {
     data: { session },
@@ -50,14 +42,15 @@ export default async function SettingsCompanyPage() {
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-2">
         <BackToSettingsLink />
-        <h1 className="text-h1 text-text-primary">Company</h1>
+        <h1 className="text-h1 text-text-primary">Team</h1>
         <p className="text-body text-text-secondary">
-          Display info shown on customer quote PDFs, plus the operational
-          defaults that drive consolidation and vendor routing.
+          Invite teammates, assign roles, and manage access. Deactivating
+          removes a user's role — their account and audit trail stay intact
+          and can be reactivated at any time.
         </p>
       </div>
 
-      <CompanyForm canEdit={canEdit} />
+      <TeamClient canEdit={canEdit} callerId={session.user.id} />
     </div>
   );
 }

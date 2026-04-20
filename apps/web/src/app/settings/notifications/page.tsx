@@ -1,17 +1,5 @@
 /**
- * /settings/company — company profile.
- *
- * Purpose:  Server shell that gates on session + tenant and hands off to
- *           the CompanyForm client island. The client fetches the
- *           settings payload via GET /api/settings/company and mutates
- *           via PUT + /logo. We keep the server component thin because
- *           every write needs to be client-driven for optimistic UI +
- *           file uploads.
- *
- * Inputs:   session.
- * Outputs:  JSX.
- * Agent/API: Supabase.
- * Imports:  next/navigation, supabase server, ./company-form, ../back-link.
+ * /settings/notifications — per-company notification toggles.
  *
  * LMBR.ai — Enterprise AI bid automation for wholesale lumber distributors.
  * Built by Worklighter.
@@ -22,11 +10,11 @@ import { redirect } from 'next/navigation';
 import { getSupabaseRSCClient } from '../../../lib/supabase/server';
 
 import { BackToSettingsLink } from '../back-to-settings';
-import { CompanyForm } from './company-form';
+import { NotificationsForm } from './notifications-form';
 
 export const dynamic = 'force-dynamic';
 
-export default async function SettingsCompanyPage() {
+export default async function SettingsNotificationsPage() {
   const supabase = getSupabaseRSCClient();
   const {
     data: { session },
@@ -50,14 +38,14 @@ export default async function SettingsCompanyPage() {
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-2">
         <BackToSettingsLink />
-        <h1 className="text-h1 text-text-primary">Company</h1>
+        <h1 className="text-h1 text-text-primary">Notifications</h1>
         <p className="text-body text-text-secondary">
-          Display info shown on customer quote PDFs, plus the operational
-          defaults that drive consolidation and vendor routing.
+          Email alerts at the tenant level. Per-user overrides ship later —
+          today these toggles apply to every teammate in the company.
         </p>
       </div>
 
-      <CompanyForm canEdit={canEdit} />
+      <NotificationsForm canEdit={canEdit} />
     </div>
   );
 }
